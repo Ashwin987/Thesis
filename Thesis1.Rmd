@@ -1,0 +1,3160 @@
+---
+title: "Thesies"
+author: "Ashwin"
+date: "2025-08-21"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(corrplot)
+library(ggthemes)
+library(viridis)
+library(ggrepel)
+library(stringr)
+library(maps)
+
+
+```
+
+
+```{r }
+# Preliminaries
+# ------------------------------------------------------------------------------------------------------------
+rm( list = ls() )
+
+
+
+
+# ------------------------------------------------------------------------------------------------------------
+# Load data and other objects
+Prefix_Base <- 'C:/UCLA/Thesis/Code'
+
+
+Prefix_Project <- '/Fire_Data'
+
+
+setwd("C:/UCLA/Thesis/Code")
+
+
+fire_data <-read.csv("Fire_Data.csv")
+
+
+
+
+```
+
+
+
+```{r}
+##Basic EDA
+# --------------------------------------------------------------------------------------------------------
+
+
+head(fire_data)
+
+str(fire_data)
+
+summary(fire_data)
+
+table(fire_data$wind_direction)
+
+table(fire_data$wind_speed)
+
+table(fire_data$pr)
+
+table(fire_data$vpd)
+
+
+colnames(fire_data)
+
+plot(fire_data$frp)
+
+
+
+plot(fire_data$pr, fire_data$frp)
+
+
+plot(fire_data$vpd, fire_data$frp)
+
+
+
+plot(fire_data$wind_speed,fire_data$frp)
+
+
+
+
+fire_data$acq_date <- as.Date(fire_data$acq_date, format="%m/%d/%Y")
+
+earliest_date <- min(fire_data$acq_date, na.rm = TRUE)
+latest_date   <- max(fire_data$acq_date, na.rm = TRUE)
+
+earliest_date
+latest_date
+```
+
+
+```{r}
+library(ggplot2)
+
+# make sure dates are parsed once
+fire_data$acq_date <- as.Date(fire_data$acq_date, "%m/%d/%Y")
+
+palisades <- subset(
+  fire_data,
+  latitude  >= 34.03 & latitude  <= 34.12 &
+  longitude >= -118.58 & longitude <= -118.47 &
+  acq_date %in% as.Date(c("2025-01-07","2025-01-08"))
+)
+
+altadena <- subset(
+  fire_data,
+  latitude  >= 34.10 & latitude  <= 34.25 &
+  longitude >= -118.20 & longitude <= -118.05 &
+  acq_date %in% as.Date(c("2025-01-07","2025-01-08"))
+)
+
+both <- rbind(
+  transform(palisades, fire_name = "Palisades"),
+  transform(altadena,  fire_name = "Altadena")
+)
+
+ggplot(both, aes(longitude, latitude)) +
+  geom_point(color = "red", size = 2) +
+  facet_wrap(~ fire_name, scales = "fixed") +  # or just omit 'scales'
+  coord_equal() +
+  theme_minimal() +
+  labs(title = "VIIRS Detections: Altadena vs Palisades",
+       subtitle = "Jan 7–8, 2025", x = "Longitude", y = "Latitude")
+
+
+```
+
+
+```{r}
+#Fire Detections in LA county (major cities)
+#----------------------------------------------------------------------------------
+# Load US cities dataset
+data("us.cities")
+
+# Filter LA County fires
+la_fires <- fire_data %>%
+  filter(latitude > 33.7, latitude < 34.9,
+         longitude > -119.0, longitude < -117.5)
+
+# List of major LA cities
+major_la_cities <- c("Los Angeles", "Long Beach", "Santa Clarita", "Glendale", 
+                     "Lancaster", "Palmdale", "Pomona", "Pasadena", 
+                     "Torrance", "Inglewood", "Burbank", "West Covina", 
+                     "Downey", "El Monte", "Santa Monica", "Whittier")
+
+# Filter for LA cities
+la_city_labels <- us.cities %>%
+  filter(str_detect(name, paste(major_la_cities, collapse = "|")),
+         country.etc == "CA",
+         lat > 33.7, lat < 34.9,
+         long > -119.0, long < -117.5)
+
+# Clean up city names
+la_city_labels$name_clean <- str_replace(la_city_labels$name, ", CA", "")
+
+# Get California county boundaries and filter for LA County
+ca_counties <- map_data("county")
+la_county <- ca_counties %>%
+  filter(region == "california", subregion == "los angeles")
+
+# Plot fires, cities, and LA County boundary
+ggplot() +
+  # LA County outline
+  geom_polygon(data = la_county, aes(x = long, y = lat, group = group),
+               fill = NA, color = "black", size = 0.8) +
+  # Fire points
+  geom_point(data = la_fires, aes(x = longitude, y = latitude),
+             color = "red", alpha = 0.5, size = 1) +
+  # City labels
+  geom_text_repel(data = la_city_labels, aes(x = long, y = lat, label = name_clean),
+                  size = 3.5, color = "blue", fontface = "bold", max.overlaps = 20) +
+  coord_fixed(1.3) +
+  theme_minimal() +
+  labs(title = "Fire Detections in Los Angeles County with Major Cities",
+       x = "Longitude", y = "Latitude")
+
+
+
+
+
+# Convert date
+fire_data$acq_date <- as.Date(fire_data$acq_date, format = "%m/%d/%Y")
+
+# Filter for LA County (bounding box)
+la_fires <- fire_data %>%
+  filter(latitude > 33.7, latitude < 34.9,
+         longitude > -119.0, longitude < -117.5)
+```
+
+
+```{r}
+# 1. Summary Statistics
+# -------------------------------------------------------------------------------------------------------
+summary(la_fires)
+
+# 2. Distribution of Fire Intensity (FRP)
+# ----------------------------
+ggplot(la_fires, aes(x = frp)) +
+  geom_histogram(fill = "firebrick", bins = 50, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Distribution of Fire Radiative Power (FRP)",
+       x = "FRP (MW)", y = "Count")
+
+# 3. Fires over Time
+# -------------------------------------------------------------------------------------
+ggplot(la_fires, aes(x = acq_date)) +
+  geom_histogram(bins = 100, fill = "darkorange", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Wildfire Detections Over Time in LA County",
+       x = "Date", y = "Number of Detections")
+
+
+# 4. Boxplot: FRP by Day/Night
+# ----------------------------------------------------------------------------------------
+ggplot(la_fires, aes(x = daynight, y = frp, fill = daynight)) +
+  geom_boxplot(alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "FRP Distribution: Day vs. Night",
+       x = "Time of Detection", y = "FRP (MW)")
+
+
+# 6. Spatial Fire Density Map
+# ----------------------------------------------------------------------------------------
+ggplot(la_fires, aes(x = longitude, y = latitude)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", alpha = 0.4) +
+  geom_point(color = "red", alpha = 0.3, size = 0.5) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  coord_fixed(1.3) +
+  labs(title = "Spatial Fire Density in Los Angeles County",
+       x = "Longitude", y = "Latitude")
+
+
+
+
+
+
+#ZZQ   Red dots fire detection potins
+#      yellow/purple more instwive/hot Spots
+#      Pueple- low fire occurance
+#Higher levels indicate fire prone areas
+
+
+
+# 7. Top Fire Days
+# ------------------------------------------------------------------------------------------------
+top_fire_days <- la_fires %>%
+  group_by(acq_date) %>%
+  summarise(total_fires = n()) %>%
+  arrange(desc(total_fires)) %>%
+  head(10)
+
+print(top_fire_days)
+
+
+#8. Brightness Distribution Histogram
+# ------------------------------------------------------------------------------------------------
+
+ggplot(fire_data, aes(x = brightness)) +
+  geom_histogram(bins = 50, fill = "orange", alpha = 0.7) +
+  labs(title = "Distribution of Brightness", x = "Brightness (K)", y = "Count")
+
+
+#8. Brightness vs FRP Scatterplot
+# ------------------------------------------------------------------------------------------------
+
+ggplot(fire_data, aes(x = brightness, y = frp)) +
+  geom_point(alpha = 0.5, color = "purple") +
+  geom_smooth(method = "lm", color = "black") +
+  labs(title = "Brightness vs FRP", x = "Brightness (K)", y = "FRP (MW)")
+
+
+
+library(GGally)
+
+
+GGally::ggpairs(
+  fire_data[, c("frp", "vpd", "wind_speed", "pr", "brightness")],
+  progress = FALSE
+)
+
+
+# add log-transformed FRP column
+fire_data$log_frp <- log1p(fire_data$frp)
+
+# pairplot with log(FRP) vs predictors
+GGally::ggpairs(
+  fire_data[, c("log_frp", "vpd", "wind_speed", "pr", "brightness")],
+  progress = FALSE
+)
+```
+
+
+```{r}
+fire_data$lat_bin <- cut(fire_data$latitude, breaks = 10, labels = LETTERS[1:10])
+fire_data$lon_bin <- cut(fire_data$longitude, breaks = 10, labels = 0:9)
+fire_data$region_id <- paste0(fire_data$lat_bin, fire_data$lon_bin)
+
+fire_data$constant <- 1
+
+model_vars <- c("constant", "vpd", "tmmx_C", "pr", "wind_speed")
+
+fire_data <- fire_data %>% filter(complete.cases(across(all_of(model_vars))))
+
+#λ=x⋅β
+#λ= estimated fire instensity
+#x=  vector of predictor variables 
+
+#λ=b0​+b1​⋅vpd+b2​⋅temperature+b3​⋅wind
+##zzq - 1) Get bounds from the data (use all points)
+lat_min <- min(fire_data$latitude,  na.rm = TRUE)
+lat_max <- max(fire_data$latitude,  na.rm = TRUE)
+lon_min <- min(fire_data$longitude, na.rm = TRUE)
+lon_max <- max(fire_data$longitude, na.rm = TRUE)
+
+
+pad_lat <- (lat_max - lat_min) * 0.001
+pad_lon <- (lon_max - lon_min) * 0.001
+lat_min <- lat_min - pad_lat; lat_max <- lat_max + pad_lat
+lon_min <- lon_min - pad_lon; lon_max <- lon_max + pad_lon
+
+
+# 2) Build 10×10 breaks and labels
+
+lat_breaks <- seq(lat_min, lat_max, length.out = 11)
+lon_breaks <- seq(lon_min, lon_max, length.out = 11)
+
+lat_labels <- LETTERS[1:10]
+lon_labels <- 0:9
+
+
+# 3) Assign bins & region_id to EVERY point (keep all rows)
+
+fire_all <- fire_data %>%
+  mutate(
+    lat_bin = cut(latitude,  breaks = lat_breaks, labels = lat_labels,
+                  include.lowest = TRUE, right = FALSE),
+    lon_bin = cut(longitude, breaks = lon_breaks, labels = lon_labels,
+                  include.lowest = TRUE, right = FALSE),
+    region_id = paste0(lat_bin, lon_bin)
+  )
+
+# 4) Grid rectangles for plotting
+
+grid_df <- expand.grid(lat_i = 1:10, lon_j = 1:10) %>%
+  mutate(
+    lat_min_cell = lat_breaks[lat_i],
+    lat_max_cell = lat_breaks[lat_i + 1],
+    lon_min_cell = lon_breaks[lon_j],
+    lon_max_cell = lon_breaks[lon_j +1],
+    lat_bin = lat_labels[lat_i],
+    lon_bin = lon_labels[lon_j],
+    
+    region_id = paste0(lat_bin, lon_bin),
+    lat_ctr = (lat_min_cell + lat_max_cell) / 2,
+    lon_ctr = (lon_min_cell + lon_max_cell) / 2
+  )
+
+  #5 heatmap by cell detections
+
+counts_df <- fire_all %>%
+  filter(!is.na(region_id)) %>%
+  count(region_id, name = "fires")
+
+grid_counts <- grid_df %>%
+  left_join(counts_df, by = "region_id") %>%
+  mutate(fires = ifelse(is.na(fires), 0L, fires))
+
+p_counts <- ggplot(grid_counts) +
+  geom_rect(aes(xmin = lon_min_cell, xmax = lon_max_cell,
+                ymin = lat_min_cell, ymax = lat_max_cell, fill = fires),
+            color = "white", linewidth = 0.25) +
+  scale_fill_viridis_c(name = "Detections") +
+  geom_text(aes(x = lon_ctr, y = lat_ctr, label = region_id),
+            size = 2.6, color = "white") +
+  coord_fixed(1.3) +
+  theme_minimal() +
+  labs(title = "10×10 Regions — Detections per Cell (All Points)",
+       x = "Longitude", y = "Latitude")
+p_counts
+
+# 5b) Alt: Heatmap by average FRP per cell
+frp_df <- fire_all %>%
+  group_by(region_id) %>%
+  summarise(avg_frp = mean(frp, na.rm = TRUE), .groups = "drop")
+
+grid_frp <- grid_df %>%
+  left_join(frp_df, by = "region_id")
+
+p_frp <- ggplot(grid_frp) +
+  geom_rect(aes(xmin = lon_min_cell, xmax = lon_max_cell,
+                ymin = lat_min_cell, ymax = lat_max_cell, fill = avg_frp),
+            color = "white", linewidth = 0.25) +
+  scale_fill_viridis_c(name = "Avg FRP", na.value = "grey90") +
+  geom_text(aes(x = lon_ctr, y = lat_ctr, label = region_id),
+            size = 2.6, color = "white") +
+  coord_fixed(1.3) +
+  theme_minimal() +
+  labs(title = "10×10 Regions — Average FRP per Cell (All Points)",
+       x = "Longitude", y = "Latitude")
+p_frp
+```
+
+
+```{r}
+library(MASS)  # provides kde2d
+library(RColorBrewer)
+
+library(RColorBrewer) # for palettes
+#Raw fires
+plot(fire_data$longitude, fire_data$latitude,
+     pch = 19, cex = 0.3, col = "red",
+     xlab = "Longitude", ylab = "Latitude",
+     main = "Raw Fire Locations")
+
+
+
+
+
+
+
+# Kernel density on longitude/latitude
+k <- kde2d(
+  x = fire_data$longitude,
+  y = fire_data$latitude,
+  n = 400,
+  h = c(0.35, 0.35)
+)
+
+# White background
+plot(NA, xlim = range(k$x), ylim = range(k$y),
+     xlab = "Longitude", ylab = "Latitude",
+     main = "Kernel Density of Fire Locations",
+     type = "n")
+
+# Darker contour colors (outer = green, inner = black)
+contour_colors <- colorRampPalette(c("darkgreen", "blue", "purple", "black"))(15)
+
+# Overlay contours
+contour(
+  k,
+  col = contour_colors,
+  lwd = 2.5,          # thicker lines
+  drawlabels = TRUE,
+  labcex = 1.1,
+  add = TRUE
+)
+
+# Add fire points
+points(
+  fire_data$longitude, fire_data$latitude,
+  pch = 20, cex = 0.25, col = rgb(0,0,0,0.5)
+)
+```
+
+
+```{r}
+
+#Baseline Model
+#--------------------------------------------------------------------------
+library(car)
+#  linear regression model
+model_1 <- lm(frp ~ vpd + wind_speed + pr + brightness, data = fire_data)
+
+summary(model_1)
+vif(model_1)
+
+
+
+log_model <- lm(log(frp) ~ vpd + wind_speed + pr + brightness, data = fire_data)
+summary(log_model)
+vif(log_model)
+
+
+
+```
+
+
+```{r}
+#Poisson model
+#----------------------------------------------
+library(sf)
+library(dplyr)
+library(units)
+
+
+grid_size_km <- 10
+lon_col <- "longitude"   
+lat_col <- "latitude"
+
+crs_wgs84 <- 4326
+crs_ca_eq <- 3310  # California Albers (equal-area), good for km grids
+
+
+if (!inherits(fire_data, "sf")) {
+  stopifnot(all(c(lon_col, lat_col) %in% names (fire_data)))
+  fires_sf <- st_as_sf(fire_data, coords = c(lon_col, lat_col), crs = crs_wgs84, remove = FALSE)
+  
+} else {
+  fires_sf <- fire_data
+  if (is.na(st_crs(fires_sf))) st_crs(fires_sf) <- crs_wgs84
+}
+
+fires_eq <- st_transform(fires_sf, crs_ca_eq)
+
+# ---- make grid ----
+bbox_expanded <- st_as_sfc(st_bbox(fires_eq)) %>% st_buffer(5000) # 5km outward buffer
+cellsize_m <- set_units(grid_size_km, km) %>% set_units(m) %>% drop_units()
+
+grid <- st_make_grid(
+  bbox_expanded,
+  cellsize = c(cellsize_m, cellsize_m),
+  what = "polygons",
+  square = TRUE
+) |> st_as_sf() |>
+  mutate(cell_id = dplyr::row_number())
+
+# (quick visual check)
+plot(st_geometry(grid), col = NA, border = "grey80")
+plot(st_geometry(fires_eq), add = TRUE, pch = 16, cex = 0.35)
+
+fires_in_grid <- st_join(fires_eq, grid[, "cell_id"], join = st_within)
+
+fire_counts <- fires_in_grid |>
+  st_drop_geometry() |>
+  count(cell_id, name = "Count")
+
+grid_counts <- grid |>
+  left_join(fire_counts, by = "cell_id") |>
+  mutate(Count = ifelse(is.na(Count), 0L, as.integer(Count)))
+
+
+fires_in_grid <- st_join(fires_eq, grid[, "cell_id"], join = st_within)
+fire_counts <- fires_in_grid |>
+  st_drop_geometry() |>
+  count(cell_id, name = "Count")
+grid_presence <- grid |>
+  left_join(fire_counts, by = "cell_id") |>
+  mutate(Count   = ifelse(is.na(Count), 0L, as.integer(Count)),
+         HasFire = as.integer(Count > 0))
+ggplot(grid_presence) +
+  geom_sf(aes(fill = factor(HasFire)), color = "grey40", linewidth = 0.1) +
+  scale_fill_manual(values = c("0" = "white", "1" = "black"), name = "Fire present") +
+  labs(title = "Fire Presence per Grid Cell (0/1)") +
+  theme_minimal()
+
+
+
+
+
+
+
+
+# Intervals: (-Inf,0], (0,1], (1,9], (9,49], (49,99], (99,500], (500, Inf)
+grid_counts <- grid_counts |>
+  mutate(
+    Fire_bin = cut(
+      Count,
+      breaks = c(-Inf, 0, 1, 9, 49, 99, 500, Inf),
+      labels = c("0", "1", "2–9", "10–49", "50–99", "100–500", "501+"),
+      right  = TRUE,
+      include.lowest = TRUE
+    )
+  )
+
+ggplot(grid_counts) +
+  geom_sf(aes(fill = Fire_bin), color = "grey40", linewidth = 0.1) +
+  scale_fill_manual(
+    values = c(
+      "0"        = "white",
+      "1"        = "aquamarine1",
+      "2–9"      = "blueviolet",
+      "10–49"    = "red",
+      "50–99"    = "royalblue",
+      "100–500"  = "orange",
+      "501+"     = "#262626"
+    ),
+    name = "Fire count"
+  ) +
+  labs(title = "Fire Count per Grid Cell (Binned)") +
+  theme_minimal()
+```
+```{r}
+
+##Acquired time--------------
+
+# Assuming fire_data already has 'acq_date' and 'acq_time' columns
+fire_data <- fire_data %>%
+  mutate(
+    # Format acq_time to 4-digit string with leading zeros if necessary
+    acq_time = sprintf("%04d", as.integer(gsub("[:]", "", acq_time))),
+    
+    # Combine acq_date and acq_time into a datetime object in UTC
+    acq_datetime = as.POSIXct(paste(acq_date, acq_time), format = "%Y-%m-%d %H%M", tz = "UTC")
+  )
+
+# Check the results
+head(fire_data)
+
+
+
+
+# Assuming fires_in_grid already has 'acq_date' and 'acq_time' columns
+fires_in_grid <- fires_in_grid %>%
+  mutate(
+    # Format acq_time to 4-digit string with leading zeros if necessary
+    acq_time = sprintf("%04d", as.integer(gsub("[:]", "", acq_time))),
+    
+    # Combine acq_date and acq_time into a datetime object in UTC
+    acq_datetime = as.POSIXct(paste(acq_date, acq_time), format = "%Y-%m-%d %H%M", tz = "UTC")
+  )
+
+# Create a copy of fires_in_grid and call it model_df
+model_df <- fires_in_grid
+
+# Check the results
+head(model_df)
+
+
+  
+
+
+```
+
+```{r}
+
+#FRP Calculations
+
+
+
+# Find the minimum and maximum dates in the model_df (using acq_date column)
+date_min <- min(model_df$acq_date)
+date_max <- max(model_df$acq_date)
+
+# Generate a sequence of dates between the min and max dates
+all_dates <- seq(date_min, date_max, by = "day")
+
+# Create the panel with all combinations of cell_id and dates
+panel <- as.data.table(expand.grid(
+  cell_id = grid$cell_id,   # from grid dataframe
+  date = all_dates
+))
+
+# Summarize the fire data for each cell_id and date
+cell_day <- model_df %>%
+  group_by(cell_id, acq_date) %>%
+  summarise(
+    y        = as.integer(n() > 0),
+    frp_sum  = sum(frp,  na.rm = TRUE),
+    frp_mean = mean(frp, na.rm = TRUE),
+    frp_max  = max(frp,  na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(date = acq_date)  # Rename acq_date to date for consistency
+
+# View the resulting summary
+head(cell_day)
+
+```
+
+
+```{r}
+
+
+#COMPUTING PER-CELL DAY AVERAGES
+
+
+library(dplyr)
+
+# ensure we have a proper Date to join on
+if (!("acq_date" %in% names(model_df)) || !inherits(model_df$acq_date, "Date")) {
+  model_df <- model_df %>% mutate(acq_date = as.Date(acq_datetime))
+} else {
+  model_df <- model_df %>% mutate(acq_date = as.Date(acq_date))
+}
+
+# 1) per cell-day averages
+covariates_day_means <- model_df %>%
+  group_by(cell_id, acq_date) %>%
+  summarise(
+    wind_speed_day_mean = mean(wind_speed, na.rm = TRUE),
+    vpd_day_mean        = mean(vpd,        na.rm = TRUE),
+    pr_day_mean         = mean(pr,         na.rm = TRUE),
+    brightness_day_mean = mean(brightness, na.rm = TRUE),
+    frp_day_mean = mean(frp, na.rm=TRUE),
+    
+    .groups = "drop"
+  )
+
+# If model_df is an sf object, remove the geometry before joining
+model_df <- st_drop_geometry(model_df)
+
+# Now do the join
+model_df <- model_df %>%
+  left_join(covariates_day_means, by = c("cell_id", "acq_date"))
+
+
+
+# helper so all-NA columns return NA (not NaN)
+mean_na <- function(x) if (all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
+
+model_df <- model_df %>%
+  group_by(cell_id) %>%
+  mutate(
+    avg_frp         = mean_na(frp),
+    avg_brightness  = mean_na(brightness),
+    avg_vpd         = mean_na(vpd),
+    avg_pr          = mean_na(pr),
+    avg_wind_speed  = mean_na(wind_speed)
+  ) %>%
+  ungroup()
+
+
+    
+  
+
+```
+
+
+```{r}
+
+grid_sf <- grid
+st_geometry(grid_sf) <- "x"
+
+library(data.table)
+
+library(sf)
+library(data.table)
+library(dplyr)
+
+model_work <- data.table::copy(model_df)
+
+events <- as.data.table(model_work)[
+  , .(cell_id = as.integer(cell_id), date = as.Date(acq_datetime))]
+events <- unique(events)[, y := 1L]
+
+# full panel: every cell × every date in the observed window
+grid_sf <- grid
+sf::st_geometry(grid_sf) <- "x"            # ensure 'x' is the active geometry
+
+all_cells <- sort(grid_sf$cell_id)
+all_dates <- seq(min(events$date), max(events$date), by = "day")
+
+panel_work <- CJ(cell_id = all_cells, date = all_dates)
+panel_work <- events[panel_work, on = .(cell_id, date)]
+panel_work[is.na(y), y := 0L]
+setkey(panel_work, date, cell_id)
+
+
+nb_idx   <- st_touches(grid_sf)                 # list of row indices per cell
+cell_ids <- grid_sf$cell_id
+names(nb_idx) <- as.character(cell_ids)
+nb_ids   <- lapply(nb_idx, function(ix) cell_ids[ix])  # convert to cell_id neighbors
+
+## ---- 3) precompute burns-by-date ---------------------------------------
+burns_by_date <- panel_work[y == 1, .(cells = list(cell_id)), keyby = date]
+
+
+dates <- sort(unique(panel_work$date))
+
+counter <- rep(10^6L, length(cell_ids))        # large sentinel = "no prior burn yet"
+names(counter) <- as.character(cell_ids)
+
+panel_work[, days_since_near_burn_queen := NA_integer_]
+
+for (d in dates) {
+
+  panel_work[date == d, days_since_near_burn_queen := counter[as.character(cell_id)]]
+
+
+  b <- burns_by_date[.(d), cells][[1]]
+  if (!is.null(b) && length(b)) {
+    touched <- unique(c(b, unlist(nb_ids[as.character(b)])))  
+    if (length(touched)) counter[as.character(touched)] <- 0L
+  }
+
+ 
+  counter <- counter + 1L
+}
+
+
+counter2 <- rep(10^6L, length(cell_ids))
+names(counter2) <- as.character(cell_ids)
+
+panel_work[, days_until_near_burn_queen := NA_integer_]
+
+for (d in rev(dates)) {
+  # write value for day D (from future perspective)
+  panel_work[date == d, days_until_near_burn_queen := counter2[as.character(cell_id)]]
+
+  # burns ON day D → reset for the previous day
+  b <- burns_by_date[.(d), cells][[1]]
+  if (!is.null(b) && length(b)) {
+    touched <- unique(c(b, unlist(nb_ids[as.character(b)])))
+    if (length(touched)) counter2[as.character(touched)] <- 0L
+  }
+
+
+  counter2 <- counter2 + 1L
+}
+
+
+cap <- 180L
+panel_work[, `:=`(
+  dsnb_capped = pmin(days_since_near_burn_queen, cap),
+  dsnb_log    = log1p(days_since_near_burn_queen),
+  dunb_capped = pmin(days_until_near_burn_queen, cap),
+  dunb_log    = log1p(days_until_near_burn_queen)
+)]
+
+
+d1 <- min(panel_work$date); d2 <- d1 + 1L
+panel_work[date %in% c(d1, d2) & y == 1][order(cell_id, date)][1:10]
+
+# 2) Distributions
+summary(panel_work$days_since_near_burn_queen)
+summary(panel_work$days_until_near_burn_queen)
+
+
+stopifnot(sum(panel_work$y) == nrow(unique(events[, .(cell_id, date)])))
+
+
+panel_work[days_since_near_burn_queen >= 1e6,
+           days_since_near_burn_queen := 0L]
+
+panel_work[days_until_near_burn_queen >= 1e6,
+           days_until_near_burn_queen := 0L]
+
+
+#panel_work$dsnb_capped=NULL
+#panel_work$dunb_capped=NULL
+ #panel_work$dsnb_log=NULL
+ #panel_work$dunb_log=NULL
+
+
+```
+
+```{r}
+#only extracting the first fire of each cell id and joining that with the seasons and then joining it on panel_work_ready (NEW DF)
+
+
+panel_src <- panel_work
+model_src <- model_df
+
+cell_means <- model_src %>%
+  group_by(cell_id) %>%
+  summarise(
+    cell_lat = first(latitude),
+    cell_lon = first(longitude),
+    cell_frp_mean = first(avg_frp),
+    ell_bright_mean  = first(avg_brightness),
+    cell_vpd_mean     = first(avg_vpd),
+    cell_pr_mean      = first(avg_pr),
+    cell_wind_mean    = first(avg_wind_speed),
+    .groups = "drop"
+  )
+    
+  panel_work_ready <- panel_work %>%
+  mutate(
+    date = as.Date(date),
+    doy  = yday(date),
+    sin1 = sin(2*pi*doy/365),
+    cos1 = cos(2*pi*doy/365)
+  ) %>%
+  left_join(cell_means, by = "cell_id")
+  
+  
+  
+
+
+```
+
+
+```{r}
+
+#Remvoving the na's from panel and keepig the cells' means 
+
+g_means <- summarise(cell_means,
+  g_frp    = mean(cell_frp_mean,    na.rm = TRUE),
+  g_bright = mean(ell_bright_mean, na.rm = TRUE),
+  g_vpd    = mean(cell_vpd_mean,    na.rm = TRUE),
+  g_pr     = mean(cell_pr_mean,     na.rm = TRUE),
+  g_wind   = mean(cell_wind_mean,   na.rm = TRUE),
+  g_lat    = mean(cell_lat,         na.rm = TRUE),
+  g_lon    = mean(cell_lon,         na.rm = TRUE)
+)
+
+panel_work_ready <- panel_work_ready %>%
+  mutate(
+    cell_frp_mean     = ifelse(is.na(cell_frp_mean),     g_means$g_frp,    cell_frp_mean),
+    cell_bright_mean  = ifelse(is.na(ell_bright_mean),  g_means$g_bright, ell_bright_mean),
+    cell_vpd_mean     = ifelse(is.na(cell_vpd_mean),     g_means$g_vpd,    cell_vpd_mean),
+    cell_pr_mean      = ifelse(is.na(cell_pr_mean),      g_means$g_pr,     cell_pr_mean),
+    cell_wind_mean    = ifelse(is.na(cell_wind_mean),    g_means$g_wind,   cell_wind_mean),
+    cell_lat          = ifelse(is.na(cell_lat),          g_means$g_lat,    cell_lat),
+    cell_lon          = ifelse(is.na(cell_lon),          g_means$g_lon,    cell_lon)
+  )
+```
+
+
+```{r}
+#Adding Seasons to the df-----------------------------------
+
+panel_work_ready <- panel_work_ready %>%
+  mutate(
+    month  = month(date),
+    season = case_when(
+      month %in% c(12, 1, 2)  ~ "Winter",
+      month %in% c(3, 4, 5)   ~ "Spring",
+      month %in% c(6, 7, 8)   ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Fall",
+      TRUE ~ NA_character_
+    ),
+    season = factor(season, levels = c("Winter","Spring","Summer","Fall"))
+  )
+
+```
+
+```{r}
+
+
+ggplot() +
+  geom_sf(data = grid, fill = NA, color = "grey35", linewidth = 0.2) +
+  geom_sf_text(data = grid, aes(label = cell_id), size = 2.5) +
+  labs(title = "Grid with Cell IDs") +
+  theme_minimal()
+
+```
+
+
+
+
+```{r}
+
+#Preparing and adding the variables (Z-Scores)
+library(dplyr)
+
+# ensure plain data.frame (avoid data.table select masking)
+panel_work_ready <- as.data.frame(panel_work_ready)
+
+# create z-scores from your *_mean columns
+panel_work_ready$z_vpd  <- as.numeric(scale(panel_work_ready$cell_vpd_mean))
+panel_work_ready$z_pr   <- as.numeric(scale(panel_work_ready$cell_pr_mean))
+panel_work_ready$z_wind <- as.numeric(scale(panel_work_ready$cell_wind_mean))
+
+# check required base columns
+req_base <- c("cell_id","cell_lon","cell_lat","season","month")
+miss_base <- setdiff(req_base, names(panel_work_ready))
+if (length(miss_base)) stop("Missing base cols: ", paste(miss_base, collapse=", "))
+
+
+```
+```{r}
+
+```
+
+```{r}
+
+#a Filters by season/month
+#Defines a spatial observation window (W)
+# Fits the SG model
+
+
+
+
+if (!requireNamespace("spatstat", quietly = TRUE)) {
+  install.packages("spatstat",
+                   repos = c("https://spatstat.r-universe.dev",
+                             "https://cloud.r-project.org"))
+}
+library(spatstat)
+
+fit_sg_slice_binned <- function(panel, season = NULL, month = NULL,
+                                predictors = c("z_vpd","z_pr","z_wind"),
+                                nx = 200, ny = 200) {
+  panel <- as.data.frame(panel)
+
+  # inner helper: bin scattered (x,y,z) to fixed grid -> 'im'
+  make_im_binned <- function(x, y, z, W, nx = 200, ny = 200, fill = NA_real_) {
+    stopifnot(length(x)==length(y), length(y)==length(z))
+    xr <- as.numeric(W$xrange); yr <- as.numeric(W$yrange)
+    gx <- seq(xr[1], xr[2], length.out = nx)  # columns (x)
+    gy <- seq(yr[1], yr[2], length.out = ny)  # rows    (y)
+    ix <- findInterval(x, gx, all.inside = TRUE)
+    iy <- findInterval(y, gy, all.inside = TRUE)
+    ok <- is.finite(z); ix <- ix[ok]; iy <- iy[ok]; zv <- z[ok]
+    ixf <- factor(ix, levels = 1:nx); iyf <- factor(iy, levels = 1:ny)
+    Z <- tapply(zv, list(iyf, ixf), mean, na.rm = TRUE)
+    Z <- as.matrix(Z); storage.mode(Z) <- "double"
+    if (any(!is.finite(Z))) {
+      med <- stats::median(zv, na.rm = TRUE); if (!is.finite(med)) med <- 0
+      Z[!is.finite(Z)] <- med
+    }
+    spatstat.geom::im(mat = Z, xcol = gx, yrow = gy)
+  }
+
+  # events (prefer 'y' if present; else FRP>0)
+  dat <- dplyr::mutate(
+    panel,
+    fire_event = if ("y" %in% names(panel)) (panel$y == 1) else
+                   (is.finite(panel$cell_frp_mean) & panel$cell_frp_mean > 0)
+  )
+  if (!is.null(season)) dat <- dplyr::filter(dat, .data$season == season)
+  if (!is.null(month))  dat <- dplyr::filter(dat, .data$month  == month)
+
+  dat <- dplyr::filter(dat, is.finite(cell_lon), is.finite(cell_lat))
+
+  # ensure predictors exist
+  missing <- setdiff(predictors, names(dat))
+  if (length(missing)) stop("Missing predictors: ", paste(missing, collapse = ", "))
+
+  dat <- dplyr::select(dat, cell_id, cell_lon, cell_lat, fire_event, dplyr::all_of(predictors))
+  if (nrow(dat) == 0) stop("No rows in this slice.")
+  if (sum(dat$fire_event, na.rm = TRUE) < 20) stop("Not enough fire points in this slice.")
+
+  # window & events
+  W <- owin(xrange = range(dat$cell_lon), yrange = range(dat$cell_lat))
+  fires <- dplyr::filter(dat, fire_event)
+  pp <- ppp(x = fires$cell_lon, y = fires$cell_lat, window = W, checkdup = FALSE)
+
+  # covariate images
+  cov_list <- setNames(vector("list", length(predictors)), predictors)
+  for (nm in predictors) {
+    cov_list[[nm]] <- make_im_binned(dat$cell_lon, dat$cell_lat, dat[[nm]], W, nx = nx, ny = ny)
+  }
+
+  # model and fit
+  rhs <- paste(predictors, collapse = " + ")
+  fml <- as.formula(paste("pp ~", rhs))
+  fit <- ppm(fml, covariates = cov_list, correction = "border")
+
+  # predict λ̂ back at original cell centers
+  lam_im   <- predict(fit, type = "intensity")
+  lam_cell <- lam_im[list(x = dat$cell_lon, y = dat$cell_lat)]
+
+  lambda_df <- dplyr::mutate(dat, lambda_hat = lam_cell) |>
+               dplyr::select(cell_id, cell_lon, cell_lat, lambda_hat)
+
+  list(
+    fit      = fit,
+    coef     = coef(fit),
+    lambda   = lambda_df,
+    window   = W,
+    formula  = fml,
+    used_cov = predictors,
+    grid_nx  = nx, grid_ny = ny
+  )
+}
+
+```
+
+
+```{r}
+#Model one  climate only
+
+# -------------------------
+# 0) Keep only fire events (occurrence model fits on y==1)
+# -------------------------
+panel_fire_only <- panel_work_ready %>% filter(y == 1)
+
+# -------------------------
+# 1) Ensure we have cell-level climate means
+#    If your data already has these (cell_vpd_mean, cell_pr_mean, cell_wind_mean),
+#    we’ll use them. Otherwise compute from event rows.
+# -------------------------
+has_cell_means <- all(c("cell_vpd_mean","cell_pr_mean","cell_wind_mean") %in% names(panel_fire_only))
+
+if (!has_cell_means) {
+  panel_fire_only <- panel_fire_only %>%
+    group_by(cell_id) %>%
+    mutate(
+      cell_vpd_mean  = mean(vpd,        na.rm = TRUE),
+      cell_pr_mean   = mean(pr,         na.rm = TRUE),
+      cell_wind_mean = mean(wind_speed, na.rm = TRUE)
+    ) %>%
+    ungroup()
+}
+
+# -------------------------
+# 2) Fit SG occurrence model (climate-only), one global fit
+# -------------------------
+preds_occ <- c("cell_vpd_mean","cell_pr_mean","cell_wind_mean")
+
+missing_cols <- setdiff(preds_occ, names(panel_fire_only))
+if (length(missing_cols)) {
+  stop(sprintf("Missing predictors for climate-only model: %s",
+               paste(missing_cols, collapse = ", ")))
+}
+
+res_occ <- fit_sg_slice_binned(
+  panel_fire_only,
+  season     = NULL,
+  month      = NULL,
+  predictors = preds_occ,
+  nx = 180, ny = 180
+)
+
+# Coefs
+coef_occ <- data.frame(
+  term = names(res_occ$coef),
+  estimate = as.numeric(res_occ$coef),
+  row.names = NULL
+)
+head(coef_occ)
+
+# -------------------------
+# 3) One row per cell_id with its climate means (only cells that burned)
+# -------------------------
+cell_climate_means <- panel_fire_only %>%
+  group_by(cell_id) %>%
+  summarise(
+    cell_vpd_mean  = first(cell_vpd_mean),
+    cell_pr_mean   = first(cell_pr_mean),
+    cell_wind_mean = first(cell_wind_mean),
+    .groups = "drop"
+  )
+
+# -------------------------
+# 4) Predict λ̂ per cell from SG coefficients (manual Xβ)
+# -------------------------
+X_cell <- model.matrix(
+  ~ cell_vpd_mean + cell_pr_mean + cell_wind_mean,
+  data = cell_climate_means
+)
+
+b <- setNames(as.numeric(res_occ$coef), names(res_occ$coef))
+b <- b[colnames(X_cell)]
+b[is.na(b)] <- 0
+
+eta_cell <- as.numeric(X_cell %*% b)
+lambda_cell_occ_final <- cell_climate_means %>%
+  mutate(lambda_hat = exp(eta_cell)) %>%
+  dplyr::select(cell_id, lambda_hat)
+
+# Inspect
+head(lambda_cell_occ_final)
+summary(lambda_cell_occ_final$lambda_hat)
+```
+
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(sf)
+
+# join climate-only λ̂ to your grid polygons
+grid_map <- grid_sf %>%
+  left_join(lambda_cell_occ_final, by = "cell_id")
+
+p <- ggplot(grid_map) +
+  geom_sf(aes(fill = lambda_hat), color = "grey60", size = 0.15) +
+  scale_fill_viridis_c(trans = "log10",
+                       breaks = c(50, 1e3, 1e4, 1e5, 4e5),
+                       labels = scales::label_number(big.mark = ",")) +
+  labs(title = "Predicted Fire Intensity (λ̂) per Grid Cell — Climate Only",
+       fill = "λ̂") +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid = element_blank())
+
+print(p)
+ggsave("ClimateOnly_IntensityPerGridCell.png", p, width = 8, height = 6, dpi = 300)
+
+
+```
+```{r}
+panel_work_ready <- as.data.frame(panel_work_ready)
+
+# transform days-since-burn; cap then log1p; z-score
+panel_work_ready <- panel_work_ready %>%
+  mutate(
+    ds_capped = pmin(days_since_near_burn_queen, 365),  # adjust cap if you prefer (e.g., 180/730)
+    ds_log    = log1p(ds_capped),
+    z_ds      = as.numeric(scale(ds_log))
+  )
+
+```
+
+
+
+
+
+```{r}
+if (!requireNamespace("spatstat", quietly = TRUE)) {
+  install.packages("spatstat",
+                   repos = c("https://spatstat.r-universe.dev",
+                             "https://cloud.r-project.org"))
+}
+library(spatstat)
+
+fit_sg_slice_binned_ds <- function(panel, season = NULL, month = NULL,
+                                   predictors = c("z_ds"),
+                                   nx = 200, ny = 200) {
+  panel <- as.data.frame(panel)
+
+  make_im_binned <- function(x, y, z, W, nx = 200, ny = 200, fill = NA_real_) {
+    stopifnot(length(x)==length(y), length(y)==length(z))
+    xr <- as.numeric(W$xrange); yr <- as.numeric(W$yrange)
+    gx <- seq(xr[1], xr[2], length.out = nx)  # columns (x)
+    gy <- seq(yr[1], yr[2], length.out = ny)  # rows    (y)
+    ix <- findInterval(x, gx, all.inside = TRUE)
+    iy <- findInterval(y, gy, all.inside = TRUE)
+    ok <- is.finite(z); ix <- ix[ok]; iy <- iy[ok]; zv <- z[ok]
+    ixf <- factor(ix, levels = 1:nx); iyf <- factor(iy, levels = 1:ny)
+    Z <- tapply(zv, list(iyf, ixf), mean, na.rm = TRUE)
+    Z <- as.matrix(Z); storage.mode(Z) <- "double"
+    if (any(!is.finite(Z))) {
+      med <- stats::median(zv, na.rm = TRUE); if (!is.finite(med)) med <- 0
+      Z[!is.finite(Z)] <- med
+    }
+    spatstat.geom::im(mat = Z, xcol = gx, yrow = gy)
+  }
+
+  dat <- dplyr::mutate(
+    panel,
+    fire_event = if ("y" %in% names(panel)) (panel$y == 1) else
+                   (is.finite(panel$cell_frp_mean) & panel$cell_frp_mean > 0)
+  )
+  if (!is.null(season)) dat <- dplyr::filter(dat, .data$season == season)
+  if (!is.null(month))  dat <- dplyr::filter(dat, .data$month  == month)
+
+  dat <- dplyr::filter(dat, is.finite(cell_lon), is.finite(cell_lat))
+
+  missing <- setdiff(predictors, names(dat))
+  if (length(missing)) stop("Missing predictors: ", paste(missing, collapse = ", "))
+
+  dat <- dplyr::select(dat, cell_id, cell_lon, cell_lat, fire_event, dplyr::all_of(predictors))
+  if (nrow(dat) == 0) stop("No rows in this slice.")
+  if (sum(dat$fire_event, na.rm = TRUE) < 20) stop("Not enough fire points in this slice.")
+
+  # window & events
+  W <- owin(xrange = range(dat$cell_lon), yrange = range(dat$cell_lat))
+  fires <- dplyr::filter(dat, fire_event)
+  pp <- ppp(x = fires$cell_lon, y = fires$cell_lat, window = W, checkdup = FALSE)
+
+  cov_list <- setNames(vector("list", length(predictors)), predictors)
+  for (nm in predictors) {
+    cov_list[[nm]] <- make_im_binned(dat$cell_lon, dat$cell_lat, dat[[nm]], W, nx = nx, ny = ny)
+  }
+
+  rhs <- paste(predictors, collapse = " + ")
+  fml <- as.formula(paste("pp ~", rhs))
+  fit <- ppm(fml, covariates = cov_list, correction = "border")
+
+  lam_im   <- predict(fit, type = "intensity")
+  lam_cell <- lam_im[list(x = dat$cell_lon, y = dat$cell_lat)]
+
+  lambda_df <- dplyr::mutate(dat, lambda_hat = lam_cell) |>
+               dplyr::select(cell_id, cell_lon, cell_lat, lambda_hat)
+
+  list(
+    fit      = fit,
+    coef     = coef(fit),
+    lambda   = lambda_df,
+    window   = W,
+    formula  = fml,
+    used_cov = predictors,
+    grid_nx  = nx, grid_ny = ny
+  )
+}
+
+```
+
+
+
+
+
+```{r}
+# =========================
+# Model 3 Fire SEVERITY model
+# =========================
+
+
+library(dplyr)
+
+global_ds_med <- median(panel_work_ready$days_since_near_burn_queen, na.rm = TRUE)
+
+panel_work_ready <- panel_work_ready %>%
+  mutate(
+    ds_missing = as.numeric(is.na(days_since_near_burn_queen)),
+    days_since_near_burn_filled = ifelse(
+      is.na(days_since_near_burn_queen), global_ds_med, days_since_near_burn_queen
+    )
+  )
+
+# -------------------------
+#(y == 1)
+
+panel_fire_only <- panel_work_ready %>% filter(y == 1)
+
+preds_int <- c(
+  "days_since_near_burn_filled",
+  "cell_bright_mean",
+  "cell_vpd_mean",
+  "cell_pr_mean",
+  "cell_wind_mean",
+  "ds_missing"
+)
+
+# sanity check
+missing_cols <- setdiff(preds_int, names(panel_fire_only))
+if (length(missing_cols)) {
+  stop(sprintf("Missing predictors in panel_fire_only: %s",
+               paste(missing_cols, collapse = ", ")))
+}
+
+res_int <- fit_sg_slice_binned_ds(
+  panel_fire_only,
+  season     = NULL,
+  month      = NULL,
+  predictors = preds_int,
+  nx = 180, ny = 180
+)
+
+coef_int <- data.frame(term = names(res_int$coef),
+                       estimate = as.numeric(res_int$coef),
+                       row.names = NULL)
+head(coef_int)
+panel_cell_means <- panel_fire_only %>%
+  group_by(cell_id) %>%
+  summarise(
+    days_since_near_burn_filled = mean(days_since_near_burn_filled, na.rm = TRUE),
+    cell_bright_mean            = mean(cell_bright_mean,            na.rm = TRUE),
+    cell_vpd_mean               = mean(cell_vpd_mean,               na.rm = TRUE),
+    cell_pr_mean                = mean(cell_pr_mean,                na.rm = TRUE),
+    cell_wind_mean              = mean(cell_wind_mean,              na.rm = TRUE),
+    ds_missing                  = mean(ds_missing,                  na.rm = TRUE), # fraction missing
+    .groups = "drop"
+  )
+
+X_cell <- model.matrix(
+  ~ days_since_near_burn_filled + cell_bright_mean + cell_vpd_mean +
+    cell_pr_mean + cell_wind_mean + ds_missing,
+  data = panel_cell_means
+)
+
+b <- setNames(as.numeric(res_int$coef), names(res_int$coef))
+X_cell <- model.matrix(
+  ~ days_since_near_burn_filled + cell_bright_mean + cell_vpd_mean +
+    cell_pr_mean + cell_wind_mean + ds_missing,
+  data = panel_cell_means
+)
+b <- b[colnames(X_cell)]
+b[is.na(b)] = 0
+
+
+eta_cell <- as.numeric(X_cell %*% b)
+panel_cell_means <- dplyr::mutate(panel_cell_means, lambda_hat = exp(eta_cell))
+
+lambda_cell_final <- panel_cell_means %>%
+  dplyr::select(cell_id, lambda_hat)
+
+head(lambda_cell_final)
+summary(lambda_cell_final$lambda_hat)
+
+
+```
+```{r}
+
+# predictors from Model 3
+preds <- c("days_since_near_burn_filled",
+           "cell_bright_mean", 
+           "cell_vpd_mean", 
+           "cell_pr_mean", 
+           "cell_wind_mean", 
+           "ds_missing")
+
+# select predictors
+df <- panel_fire_only %>%
+  dplyr::select(all_of(preds)) %>%
+  mutate(across(everything(), as.numeric))
+
+# drop constant columns (no variance)
+const_cols <- names(df)[sapply(df, function(x) length(unique(na.omit(x))) <= 1)]
+df <- dplyr::select(df, -all_of(const_cols))
+
+# drop exact linear combos
+X <- model.matrix(~ ., data=df)
+lc <- findLinearCombos(X)
+if (!is.null(lc$remove)) {
+  X <- X[, -lc$remove, drop=FALSE]
+}
+
+# final data.frame of predictors
+df_fix <- as.data.frame(X[, -1, drop=FALSE])  # remove intercept
+
+# fit dummy linear model for VIF check
+m3_vif <- lm(rnorm(nrow(df_fix)) ~ ., data=df_fix)
+vif_vals <- vif(m3_vif)
+print(vif_vals)
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)       # for label_number
+# install.packages("viridis") if needed
+library(viridis)
+
+# join λ̂ to the grid
+grid_intensity <- grid %>%
+  left_join(lambda_cell_final, by = "cell_id")
+
+# plot with log color scale so hotspots pop
+ggplot(grid_intensity) +
+  geom_sf(aes(fill = lambda_hat), color = "grey40", linewidth = 0.1) +
+  scale_fill_viridis_c(
+    trans = "log",
+    na.value = "white",
+    labels = label_number(accuracy = 1),
+    name = expression(hat(lambda))
+  ) +
+  labs(title = "Predicted Fire Intensity (λ̂) per Grid Cell") +
+  theme_minimal()
+
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# define bins by magnitude
+cuts  <- c(0, 1e3, 5e3, 1e4, 2e4, 5e4, 1e5, 5e5, Inf)
+labs  <- c("≤1k","1–5k","5–10k","10–20k","20–50k","50–100k","100–500k","500k+")
+cols  <- c("#f7fbff","#c6dbef","#9ecae1","#6baed6","#4292c6","#2171b5","#084594","#000000")
+
+grid_intensity_binned <- grid %>%
+  left_join(lambda_cell_final, by = "cell_id") %>%
+  mutate(lambda_bin = cut(lambda_hat, breaks = cuts, labels = labs, include.lowest = TRUE))
+
+ggplot(grid_intensity_binned) +
+  geom_sf(aes(fill = lambda_bin), color = "grey40", linewidth = 0.1) +
+  scale_fill_manual(values = cols, name = expression(hat(lambda))) +
+  labs(title = "Fire Intensity (λ̂) per Grid Cell — Binned") +
+  theme_minimal()
+
+```
+```{r}
+
+# -------------------------
+#  Model 2- Days Only 
+# -------------------------
+panel_fire_only <- panel_work_ready %>%
+  filter(y == 1)
+
+global_ds_med <- median(panel_fire_only$days_since_near_burn_queen, na.rm = TRUE)
+
+panel_fire_only <- panel_fire_only %>%
+  mutate(
+    ds_missing = as.numeric(is.na(days_since_near_burn_queen)),
+    days_since_near_burn_filled = ifelse(
+      is.na(days_since_near_burn_queen), global_ds_med, days_since_near_burn_queen
+    )
+  )
+
+# -------------------------
+# 1) Fit DS-only model on events (no month loop)
+# -------------------------
+res_ds <- fit_sg_slice_binned_ds(
+  panel_fire_only,
+  season     = NULL,
+  month      = NULL,
+  predictors = c("days_since_near_burn_filled", "ds_missing"),
+  nx = 180, ny = 180
+)
+
+coef_ds <- data.frame(
+  term     = names(res_ds$coef),
+  estimate = as.numeric(res_ds$coef),
+  row.names = NULL
+)
+head(coef_ds)
+
+# -------------------------
+# 2) One row per cell_id (only cells that had fires)
+#    Use the average days-since over that cell’s fire events
+# -------------------------
+cell_ds_means <- panel_fire_only %>%
+  group_by(cell_id) %>%
+  summarise(
+    days_since_near_burn_filled = mean(days_since_near_burn_filled, na.rm = TRUE),
+    ds_missing                  = mean(ds_missing, na.rm = TRUE),  # fraction missing in that cell’s events
+    .groups = "drop"
+  )
+
+# -------------------------
+# 3) Predict λ̂ per cell from DS-only coefficients
+# -------------------------
+X_cell <- model.matrix(
+  ~ days_since_near_burn_filled + ds_missing,
+  data = cell_ds_means
+)
+
+b <- setNames(as.numeric(res_ds$coef), names(res_ds$coef))
+b <- b[colnames(X_cell)]
+b[is.na(b)] <- 0
+
+eta_cell <- as.numeric(X_cell %*% b)
+lambda_cell_ds_only <- cell_ds_means %>%
+  dplyr::mutate(lambda_hat = exp(eta_cell)) %>%
+  dplyr::select(cell_id, lambda_hat)
+
+
+# final output (one λ̂ per cell that had a fire)
+head(lambda_cell_ds_only)
+
+```
+
+```{r}
+# 1) Join per-cell λ̂ back to the grid
+grid_ds <- grid %>%
+  left_join(lambda_cell_ds_only, by = "cell_id")
+
+# 2) Define bins for λ̂ (adjust cut points to match your data spread)
+grid_ds <- grid_ds %>%
+  mutate(
+    lambda_bin = cut(
+      lambda_hat,
+      breaks = c(-Inf, 1000, 5000, 10000, 25000, 50000, 100000, 500000, Inf),
+      labels = c("≤1k", "1–5k", "5–10k", "10–25k", "25–50k",
+                 "50–100k", "100–500k", "500k+"),
+      include.lowest = TRUE, right = TRUE
+    )
+  )
+
+# 3) Plot grid, coloring by intensity bin
+ggplot(grid_ds) +
+  geom_sf(aes(fill = lambda_bin), color = "grey40", linewidth = 0.1) +
+  scale_fill_manual(
+    values = c(
+      "≤1k"     = "#f7fbff",
+      "1–5k"    = "#c6dbef",
+      "5–10k"   = "#F54927",
+      "10–25k"  = "#27F549",
+      "25–50k"  = "#B027F5",
+      "50–100k" = "#411C11",
+      "100–500k"= "#084594",
+      "500k+"   = "#000000"
+    ),
+    name = expression(hat(lambda))
+  ) +
+  labs(
+    title = "Days-Since-Only Model: Predicted Fire Intensity per Cell",
+    subtitle = "Binned by λ̂ (log-scale breaks)",
+    fill = "Predicted\nIntensity"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+```{r}
+
+
+#MODEL 3
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+})
+
+vars <- c("cell_frp_mean",
+          "days_since_near_burn_queen",
+          "cell_bright_mean",
+          "cell_vpd_mean",
+          "cell_pr_mean",
+          "cell_wind_mean")
+
+raw <- panel_work_ready %>%
+  filter(y == 1) %>%
+  dplyr::select(dplyr::all_of(vars))
+
+# --- Quick counts
+diag_tbl <- sapply(raw, function(x) c(
+  n_na   = sum(is.na(x)),
+  n_inf  = sum(is.infinite(x)),
+  n_zero = sum(x == 0, na.rm = TRUE)
+))
+cat("Diagnostics (NAs/INFs/zeros):\n"); print(diag_tbl)
+
+# --- Clean: numeric, turn Inf->NA, drop NA, require positive FRP
+df <- raw %>%
+  mutate(across(everything(), ~ suppressWarnings(as.numeric(.)))) %>%
+  mutate(across(everything(), ~ ifelse(is.infinite(.), NA_real_, .))) %>%
+  drop_na() %>%
+  filter(cell_frp_mean > 0)
+
+cat("# Rows after cleaning:", nrow(df), "\n")
+
+# --- Light winsorizing to tame extreme outliers (1st–99th pct)
+winsor <- function(x, p = 0.01) {
+  lo <- quantile(x, p, na.rm = TRUE)
+  hi <- quantile(x, 1 - p, na.rm = TRUE)
+  pmin(pmax(x, lo), hi)
+}
+df <- df %>%
+  mutate(
+    days_since_near_burn_queen = winsor(days_since_near_burn_queen),
+    cell_bright_mean           = winsor(cell_bright_mean),
+    cell_vpd_mean              = winsor(cell_vpd_mean),
+    cell_pr_mean               = winsor(cell_pr_mean),
+    cell_wind_mean             = winsor(cell_wind_mean)
+  )
+
+# --- Safe scaling that avoids NaN when sd == 0
+scale_safe <- function(x) {
+  s <- sd(x, na.rm = TRUE)
+  if (is.na(s) || s == 0) return(rep(0, length(x)))
+  (x - mean(x, na.rm = TRUE)) / s
+}
+
+df <- df %>%
+  mutate(
+    z_days = scale_safe(days_since_near_burn_queen),
+    z_bri  = scale_safe(cell_bright_mean),
+    z_vpd  = scale_safe(cell_vpd_mean),
+    z_pr   = scale_safe(cell_pr_mean),
+    z_wind = scale_safe(cell_wind_mean)
+  )
+
+# --- 1) DIAGNOSE the actual model matrix for non-finites
+X <- model.matrix(~ z_days + z_bri + z_vpd + z_pr + z_wind, data = df)
+bad_cols <- colSums(!is.finite(X))
+bad_rows <- which(rowSums(!is.finite(X)) > 0)
+cat("Non-finite in design matrix? any cols>0 ->\n"); print(bad_cols)
+if (length(bad_rows)) {
+  cat("Example bad rows (first 5):", head(bad_rows, 5), "\n")
+}
+
+# If any non-finite snuck in, drop those rows (very rare after steps above)
+if (length(bad_rows)) df <- df[-bad_rows, , drop = FALSE]
+
+# --- 2) Try Gamma(log) again (with cautious controls)
+fit_ok <- TRUE
+m_gamma <- try(glm(
+  cell_frp_mean ~ z_days + z_bri + z_vpd + z_pr + z_wind,
+  data   = df,
+  family = Gamma(link = "log"),
+  control = glm.control(maxit = 200, epsilon = 1e-8, trace = FALSE)
+), silent = TRUE)
+
+if (inherits(m_gamma, "try-error")) {
+  fit_ok <- FALSE
+  cat("\nGamma(log) still failed. Will fit quasi-Gamma + log-normal alternatives.\n")
+}
+
+if (fit_ok) {
+  cat("\n=== Gamma(log) severity model ===\n")
+  print(summary(m_gamma))
+  df <- df %>%
+    mutate(
+      fitted_gamma = as.numeric(predict(m_gamma, type = "response")),
+      resid_dev    = as.numeric(residuals(m_gamma, type = "deviance")),
+      resid_pear   = as.numeric(residuals(m_gamma, type = "pearson"))
+    )
+  cat("\nFitted FRP (Gamma) summary:\n"); print(summary(df$fitted_gamma))
+}
+
+# --- 3) Quasi-Gamma (more stable IRLS) if Gamma had issues
+m_quasi <- glm(
+  cell_frp_mean ~ z_days + z_bri + z_vpd + z_pr + z_wind,
+  data   = df,
+  family = quasi(link = "log", variance = "mu^2"),
+  control = glm.control(maxit = 200, epsilon = 1e-8)
+)
+cat("\n=== Quasi-Gamma (log link) ===\n")
+print(summary(m_quasi))
+
+# --- 4) Log-normal fallback (always works)
+eps <- 1e-6
+m_log <- lm(log(cell_frp_mean + eps) ~ z_days + z_bri + z_vpd + z_pr + z_wind, data = df)
+cat("\n=== log-normal (lm on log(FRP)) ===\n")
+print(summary(m_log))
+
+df <- df %>%
+  mutate(
+    fitted_quasi = as.numeric(predict(m_quasi, type = "response")),
+    fitted_log   = exp(predict(m_log)) - eps
+  )
+
+cat("\nHead with predictions (any fitted available):\n")
+print(head(df[, c("cell_frp_mean",
+                  setdiff(c("fitted_gamma","fitted_quasi","fitted_log"),
+                          names(df)[!names(df) %in% c("fitted_gamma","fitted_quasi","fitted_log")])) ]))
+
+
+```
+```{r}
+# Residual diagnostics for log-normal model
+par(mfrow = c(1, 2))  # two plots side by side
+
+# 1. Residuals vs Fitted
+plot(m_log$fitted.values, resid(m_log),
+     main = "Residuals vs Fitted (log-FRP model)",
+     xlab = "Fitted log(FRP)",
+     ylab = "Residuals",
+     pch = 20, col = "darkblue")
+abline(h = 0, col = "red", lwd = 2)
+
+# 2. QQ-plot of residuals
+qqnorm(resid(m_log), main = "QQ-plot of residuals (log-FRP model)")
+qqline(resid(m_log), col = "red", lwd = 2)
+
+```
+```{r}
+ggplot(panel_work_ready, aes(x = factor(cell_id), y = cell_frp_mean)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(
+    title = "FRP Levels Across Cells",
+    x = "Cell ID",
+    y = "Mean FRP"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank())
+```
+```{r}
+ggplot(panel_work_ready, aes(x = as.numeric(cell_id), y = cell_frp_mean)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "FRP Levels Across Cells with Linear Trend",
+    x = "Cell ID",
+    y = "Mean FRP"
+  ) +
+  theme_minimal()
+
+
+```
+```{r}
+library(dplyr)
+
+#-----------------------Climate only model----------------------#
+
+
+# --- Select variables for climate-only model
+vars_climate <- c("cell_frp_mean",
+                  "cell_vpd_mean",
+                  "cell_pr_mean",
+                  "cell_wind_mean")
+
+raw_climate <- panel_work_ready %>%
+  filter(y == 1) %>%
+  dplyr::select(dplyr::all_of(vars_climate)) %>%
+  drop_na() %>%
+  filter(cell_frp_mean > 0)
+
+# --- Winsorize & scale
+winsor <- function(x, p = 0.01) {
+  lo <- quantile(x, p, na.rm = TRUE)
+  hi <- quantile(x, 1 - p, na.rm = TRUE)
+  pmin(pmax(x, lo), hi)
+}
+
+scale_safe <- function(x) {
+  s <- sd(x, na.rm = TRUE)
+  if (is.na(s) || s == 0) return(rep(0, length(x)))
+  (x - mean(x, na.rm = TRUE)) / s
+}
+
+df_climate <- raw_climate %>%
+  mutate(
+    cell_vpd_mean  = winsor(cell_vpd_mean),
+    cell_pr_mean   = winsor(cell_pr_mean),
+    cell_wind_mean = winsor(cell_wind_mean),
+    z_vpd  = scale_safe(cell_vpd_mean),
+    z_pr   = scale_safe(cell_pr_mean),
+    z_wind = scale_safe(cell_wind_mean)
+  )
+
+# --- Gamma GLM
+m_gamma_climate <- glm(cell_frp_mean ~ z_vpd + z_pr + z_wind,
+                       data = df_climate,
+                       family = Gamma(link="log"))
+
+summary(m_gamma_climate)
+
+# --- Quasi-Gamma
+m_quasi_climate <- glm(cell_frp_mean ~ z_vpd + z_pr + z_wind,
+                       data = df_climate,
+                       family = quasi(link="log", variance="mu^2"))
+
+summary(m_quasi_climate)
+
+# --- Log-normal (lm on log(FRP))
+eps <- 1e-6
+m_log_climate <- lm(log(cell_frp_mean + eps) ~ z_vpd + z_pr + z_wind,
+                    data = df_climate)
+
+summary(m_log_climate)
+
+```
+```{r}
+
+```
+
+```{r}
+# Residual plots for Climate-only Log-normal model
+par(mfrow=c(1,2))
+
+# Residuals vs Fitted
+plot(fitted(m_log_climate), resid(m_log_climate),
+     xlab="Fitted FRP (log-normal)",
+     ylab="Residuals",
+     main="Climate-only Log-normal Residuals")
+abline(h=0, col="red")
+
+# QQ-plot
+qqnorm(resid(m_log_climate), main="Climate-only Log-normal QQ-plot")
+qqline(resid(m_log_climate), col="red")
+
+```
+```{r}
+# ================================
+# Model 1 — Climate-only (cell level)
+# Poisson GLM with log link
+# ================================
+suppressPackageStartupMessages({
+  library(dplyr)
+})
+
+# 1) Build a cell-level dataset
+# - fire_count: number of fires in each cell
+# - exposure:   number of rows per cell (useful as an offset; if rows ~ days, it's days observed)
+# - climate:    use existing cell_*_mean columns (first() assumes they're constant per cell)
+df_cells <- panel_work_ready %>%
+  group_by(cell_id) %>%
+  summarise(
+    fire_count     = sum(y == 1, na.rm = TRUE),
+    exposure       = n(),  # replace with distinct days if you have a date column
+    cell_vpd_mean  = first(cell_vpd_mean),
+    cell_pr_mean   = first(cell_pr_mean),
+    cell_wind_mean = first(cell_wind_mean),
+    .groups = "drop"
+  ) %>%
+  tidyr::drop_na(cell_vpd_mean, cell_pr_mean, cell_wind_mean, fire_count, exposure) %>%
+  filter(exposure > 0)
+
+# (Optional) Standardize predictors for stability & comparability
+scale_safe <- function(x){ s <- sd(x, na.rm=TRUE); if (is.na(s) || s==0) return(rep(0,length(x))); (x-mean(x,na.rm=TRUE))/s }
+df_cells <- df_cells %>%
+  mutate(
+    z_vpd  = scale_safe(cell_vpd_mean),
+    z_pr   = scale_safe(cell_pr_mean),
+    z_wind = scale_safe(cell_wind_mean)
+  )
+
+# 2) Fit Poisson GLM with offset(log(exposure))
+m1 <- glm(
+  fire_count ~ z_vpd + z_pr + z_wind + offset(log(exposure)),
+  data   = df_cells,
+  family = poisson(link = "log")
+)
+
+cat("=== Climate-only (cell-level) Poisson GLM ===\n")
+print(summary(m1))
+
+# 3) Pseudo-R^2 (deviance explained) and overdispersion check
+pseudo_r2 <- 1 - (m1$deviance / m1$null.deviance)
+phi <- m1$deviance / m1$df.residual  # > ~2 suggests overdispersion
+
+cat(sprintf("\nPseudo-R^2 (deviance explained): %.3f\n", pseudo_r2))
+cat(sprintf("Overdispersion factor (phi): %.3f\n", phi))
+
+# 4) Residual diagnostics (deviance residuals)
+par(mfrow = c(1,2))
+plot(fitted(m1), residuals(m1, type="deviance"),
+     pch=20, col="steelblue",
+     xlab="Fitted counts (λ̂ per cell)", ylab="Deviance residuals",
+     main="Residuals vs Fitted — Climate-only")
+abline(h=0, col="red", lwd=2)
+
+qqnorm(residuals(m1, type="deviance"),
+       main="QQ-plot — Deviance residuals")
+qqline(residuals(m1, type="deviance"), col="red", lwd=2)
+
+
+
+
+
+
+
+
+
+```
+```{r}
+glm(fire_count ~ z_pr + z_vpd + offset(log(exposure)), family=poisson, data=df_cells)
+```
+```{r}
+# 1) Basic ranges
+summary(df_cells[, c("fire_count","exposure","cell_vpd_mean","cell_pr_mean","cell_wind_mean")])
+
+# 2) Offsets valid?
+any(df_cells$exposure <= 0)  # should be FALSE
+
+# 3) Correlations (expect precip ~ negatively correlated with VPD)
+cor(df_cells[, c("z_pr","z_vpd","z_wind")], use="pairwise.complete.obs")
+
+# 4) Overdispersion (if >> 1.5–2, consider NegBin; sign shouldn’t flip)
+m1 <- glm(fire_count ~ z_vpd + z_pr + z_wind + offset(log(exposure)),
+          family=poisson, data=df_cells)
+phi <- m1$deviance / m1$df.residual; phi
+
+# 5) Multicollinearity (VIF ideally < ~5)
+library(car); vif(m1)
+
+# 6) Influence (ensure no single cell drives signs)
+plot(cooks.distance(m1)); which(cooks.distance(m1) > 4/ nrow(df_cells))
+
+
+D <- cooks.distance(m1)
+thr <- 4 / nrow(df_cells)
+which(D > thr)                # indices above the rule-of-thumb threshold
+head(order(D, decreasing=TRUE), 10)  # top 10 most influential
+
+
+df_cells[ head(order(D, decreasing=TRUE), 10), 
+          c("cell_id","fire_count","exposure","cell_vpd_mean","cell_pr_mean","cell_wind_mean") ]
+
+
+idx <- which(D > thr)
+m_sens <- glm(fire_count ~ z_vpd + z_pr + z_wind + offset(log(exposure)),
+              family=poisson, data=df_cells[-idx,])
+cbind(full = coef(m1), no_infl = coef(m_sens))
+
+```
+
+```{r}
+
+
+#--------------Days only model --------------------------------------#
+# --- Select variables for days-only model
+vars_days <- c("cell_frp_mean",
+               "days_since_near_burn_queen")
+
+raw_days <- panel_work_ready %>%
+  filter(y == 1) %>%
+  dplyr::select(dplyr::all_of(vars_days)) %>%
+  drop_na() %>%
+  filter(cell_frp_mean > 0)
+
+# --- Winsorize & scale
+df_days <- raw_days %>%
+  mutate(
+    days_since_near_burn_queen = winsor(days_since_near_burn_queen),
+    z_days = scale_safe(days_since_near_burn_queen)
+  )
+
+# --- Gamma GLM
+m_gamma_days <- glm(cell_frp_mean ~ z_days,
+                    data = df_days,
+                    family = Gamma(link="log"))
+
+summary(m_gamma_days)
+
+# --- Quasi-Gamma
+m_quasi_days <- glm(cell_frp_mean ~ z_days,
+                    data = df_days,
+                    family = quasi(link="log", variance="mu^2"))
+
+summary(m_quasi_days)
+
+# --- Log-normal (lm on log(FRP))
+m_log_days <- lm(log(cell_frp_mean + eps) ~ z_days,
+                 data = df_days)
+
+summary(m_log_days)
+
+```
+```{r}
+# Residual plots for Days-only Log-normal model
+par(mfrow=c(1,2))  # two plots side by side
+
+# Residuals vs Fitted
+plot(fitted(m_log_days), resid(m_log_days),
+     xlab="Fitted FRP (log-normal)",
+     ylab="Residuals",
+     main="Days-only Log-normal Residuals")
+abline(h=0, col="red")
+
+# QQ-plot for normality
+qqnorm(resid(m_log_days), main="Days-only Log-normal QQ-plot")
+qqline(resid(m_log_days), col="red")
+
+```
+```{r}
+library(dplyr)
+
+scale_safe <- function(x){ s <- sd(x, na.rm=TRUE); if (is.na(s)||s==0) return(rep(0,length(x))); (x-mean(x,na.rm=TRUE))/s }
+
+# Event rows only
+df_ev <- panel_work_ready %>%
+  filter(y == 1) %>%
+  transmute(
+    cell_id, date,
+    frp  = cell_frp_mean,
+    vpd  = cell_vpd_mean,
+    pr   = cell_pr_mean,
+    wind = cell_wind_mean
+  ) %>%
+  tidyr::drop_na(frp, vpd, pr, wind)
+
+# Log-normal severity model (swap to Gamma if you prefer)
+m_sev <- lm(log(frp + 1e-6) ~ scale_safe(vpd) + scale_safe(pr) + scale_safe(wind), data = df_ev)
+
+# Predicted (back-transform)
+df_ev$pred_frp <- exp(predict(m_sev, df_ev))
+
+# Observed vs Predicted scatter
+plot(df_ev$pred_frp, df_ev$frp, pch=20,
+     xlab="Predicted FRP", ylab="Observed FRP",
+     main="Observed vs Predicted FRP (event level)")
+abline(0,1,col="red", lwd=2)
+
+
+
+```
+
+
+```{r}
+library(dplyr)
+library(zoo)
+
+# 1) Make dates comparable
+panel_work_ready <- panel_work_ready %>% mutate(date = as.Date(date))
+covariates_day_means <- covariates_day_means %>% mutate(acq_date = as.Date(acq_date))
+
+# 2) Join & RENAME to standard daily names
+panel_work_ready <- panel_work_ready %>%
+  left_join(
+    covariates_day_means %>%
+      transmute(
+        cell_id,
+        date      = acq_date,
+        pr_day    = pr_day_mean,
+        vpd_day   = vpd_day_mean,
+        wind_day  = wind_speed_day_mean,
+        frp_day   = frp_day_mean
+      ),
+    by = c("cell_id","date")
+  )
+
+# sanity:
+names(panel_work_ready)[grepl("day", names(panel_work_ready))]
+
+```
+```{r}
+day_ev <- panel_work_ready %>%
+  filter(y == 1) %>%
+  group_by(cell_id, date) %>%
+  summarise(
+    fire_count = n(),
+    frp_day    = mean(frp_day,  na.rm=TRUE),
+    pr_day     = mean(pr_day,   na.rm=TRUE),
+    vpd_day    = mean(vpd_day,  na.rm=TRUE),
+    wind_day   = mean(wind_day, na.rm=TRUE),
+    .groups="drop"
+  ) %>%
+  mutate(any_pr = pr_day > 0)
+
+labs <- if (length(unique(day_ev$any_pr)) == 2)
+  c("Fire days: pr=0","Fire days: pr>0") else
+  paste0("Fire days: ", if (unique(day_ev$any_pr)) "pr>0" else "pr=0")
+
+boxplot(frp_day ~ any_pr, data=day_ev,
+        names=labs, ylab="FRP (mean per cell–day)",
+        main="FRP on fire days by whether it rained")
+
+tapply(day_ev$frp_day, day_ev$any_pr, summary)
+prop.table(table(day_ev$any_pr))
+
+```
+```{r}
+# Inspect distribution first
+summary(day_ev$pr_day)
+quantile(day_ev$pr_day, c(.5,.9,.95,.99), na.rm=TRUE)
+table(day_ev$pr_day == 0, useNA="ifany")[TRUE]   # exact zeros
+sum(day_ev$pr_day < 0.1, na.rm=TRUE)             # traces
+
+# Define rain using a threshold (choose one)
+thr <- 1.0   # mm; try 0.5 if 1.0 is too strict
+day_ev$rain_bin <- cut(
+  day_ev$pr_day,
+  breaks = c(-Inf, 0, thr, Inf),
+  labels = c("0 mm", paste0("0–",thr," mm"), paste0("≥",thr," mm"))
+)
+
+# Boxplot with 2–3 groups
+boxplot(frp_day ~ rain_bin, data = day_ev,
+        ylab = "FRP (mean per cell–day)",
+        xlab = "Daily precipitation",
+        main = "FRP on fire days by daily precipitation bin")
+
+tapply(day_ev$frp_day, day_ev$rain_bin, summary)
+table(day_ev$rain_bin)
+
+```
+
+```{r}
+library(zoo); library(dplyr)
+summary_by_bin <- day_ev |>
+  mutate(rain_bin = cut(pr_day, c(-Inf,0,1,Inf), labels=c("0 mm","0–1 mm","≥1 mm"))) |>
+  group_by(rain_bin) |>
+  summarise(n = n(),
+            mean_frp = mean(frp_day, na.rm=TRUE),
+            median_frp = median(frp_day, na.rm=TRUE),
+            p90 = quantile(frp_day, .90, na.rm=TRUE),
+            p95 = quantile(frp_day, .95, na.rm=TRUE),
+            .groups="drop")
+summary_by_bin
+
+
+```
+```{r}
+day_ev <- panel_work_ready |> dplyr::filter(y==1) |>
+  dplyr::transmute(frp = cell_frp_mean,
+                   pr  = if ("pr_day" %in% names(panel_work_ready)) pr_day else cell_pr_mean)
+
+day_ev$bin <- cut(day_ev$pr, c(-Inf,0,1,Inf), labels=c("0","0–1","≥1 mm"))
+boxplot(frp ~ bin, data = day_ev, ylab="FRP", xlab="Daily precip bin")
+tapply(day_ev$frp, day_ev$bin, summary)
+
+      
+
+```
+
+```{r}
+precip_col <- if ("pr_day" %in% names(panel_work_ready)) "pr_day" else "cell_pr_mean"
+
+df_ev <- subset(panel_work_ready, y == 1)              # fire events only
+df_ev <- df_ev[ , c("cell_frp_mean", precip_col)]
+names(df_ev) <- c("frp", "precip")
+df_ev <- df_ev[is.finite(df_ev$frp) & is.finite(df_ev$precip), ]
+
+
+
+par(mfrow=c(1,1))
+p99 <- quantile(df_ev$precip, 0.99, na.rm=TRUE)
+x <- pmin(df_ev$precip, p99)   # trim top 1% for visibility
+y <- df_ev$frp
+
+plot(x, y, pch=16, cex=0.5,
+     xlab = if (precip_col=="pr_day") "Daily precipitation (mm)" else "Cell mean precipitation",
+     ylab = "FRP (cell_frp_mean)",
+     main = "FRP vs Precipitation (fire events)")
+lo <- loess(y ~ x, span=0.7)
+xs <- seq(min(x, na.rm=TRUE), max(x, na.rm=TRUE), length.out=200)
+lines(xs, predict(lo, data.frame(x=xs)), lwd=3)
+
+```
+```{r}
+# Are we really using pr_day?
+"pr_day" %in% names(panel_work_ready)
+
+# Fire events used in the plot
+ev <- subset(panel_work_ready, y==1)
+
+# Basic checks
+summary(ev$pr_day)
+mean(ev$pr_day == 0, na.rm=TRUE)      # proportion of 0-mm fire-days
+range(ev$pr_day, na.rm=TRUE)
+anyNA(ev$pr_day)
+
+```
+
+```{r}
+#SCRAPING SEVERITY MODEL
+
+
+
+# ================================
+# Model 1 — Climate-only + Days-Since (cell level)
+# Poisson GLM with log link
+# ================================
+suppressPackageStartupMessages({
+  library(dplyr)
+})
+
+# Pick the days-since column if it exists
+days_cols <- c("days_since_near_burn_queen","days_since_near_burn",
+               "days_since_burn","days_since")
+days_col <- intersect(days_cols, names(panel_work_ready))[1]
+if (is.na(days_col)) stop("No 'days since (last burn)' column found in panel_work_ready.")
+
+# 1) Build a cell-level dataset
+df_cells <- panel_work_ready %>%
+  group_by(cell_id) %>%
+  summarise(
+    fire_count      = sum(y == 1, na.rm = TRUE),
+    exposure        = n(),  # consider n_distinct(date) if you have a date column
+    cell_vpd_mean   = first(cell_vpd_mean),
+    cell_pr_mean    = first(cell_pr_mean),
+    cell_wind_mean  = first(cell_wind_mean),
+    cell_days_since_mean = mean(.data[[days_col]], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::drop_na(cell_vpd_mean, cell_pr_mean, cell_wind_mean,
+                 cell_days_since_mean, fire_count, exposure) %>%
+  filter(exposure > 0)
+
+# (Optional) Standardize predictors for stability & comparability
+scale_safe <- function(x){ s <- sd(x, na.rm=TRUE); if (is.na(s) || s==0) return(rep(0,length(x))); (x-mean(x,na.rm=TRUE))/s }
+df_cells <- df_cells %>%
+  mutate(
+    z_vpd        = scale_safe(cell_vpd_mean),
+    z_pr         = scale_safe(cell_pr_mean),
+    z_wind       = scale_safe(cell_wind_mean),
+    z_days_since = scale_safe(cell_days_since_mean)
+  )
+
+# 2) Fit Poisson GLM with offset(log(exposure))
+m1 <- glm(
+  fire_count ~ z_vpd + z_pr + z_wind + z_days_since + offset(log(exposure)),
+  data   = df_cells,
+  family = poisson(link = "log")
+)
+
+cat("=== Climate-only + Days-Since (cell-level) Poisson GLM ===\n")
+print(summary(m1))
+
+# 3) Pseudo-R^2 (deviance explained) and overdispersion check
+pseudo_r2 <- 1 - (m1$deviance / m1$null.deviance)
+phi <- m1$deviance / m1$df.residual  # > ~2 suggests overdispersion
+
+cat(sprintf("\nPseudo-R^2 (deviance explained): %.3f\n", pseudo_r2))
+cat(sprintf("Overdispersion factor (phi): %.3f\n", phi))
+
+# 4) Incidence Rate Ratios (exp(beta))
+IRR <- exp(coef(m1))
+cat("\nIncidence Rate Ratios (IRR = exp(beta)):\n"); print(IRR)
+
+# 5) Residual diagnostics (your original two plots still work)
+par(mfrow = c(1,2))
+plot(fitted(m1), residuals(m1, type="deviance"),
+     pch=20, col="steelblue",
+     xlab="Fitted counts (λ̂ per cell)", ylab="Deviance residuals",
+     main="Residuals vs Fitted — Climate+DaysSince")
+abline(h=0, col="red", lwd=2)
+
+qqnorm(residuals(m1, type="deviance"),
+       main="QQ-plot — Deviance residuals")
+qqline(residuals(m1, type="deviance"), col="red", lwd=2)
+
+
+
+```
+
+```{r}
+
+suppressPackageStartupMessages({
+  library(dplyr); library(ggplot2); library(scales); library(MASS)
+})
+
+# Pick the days-since column and log it
+days_cols <- c("days_since_near_burn_queen","days_since_near_burn","days_since_burn","days_since")
+days_col <- intersect(days_cols, names(panel_work_ready))[1]
+if (is.na(days_col)) stop("No 'days since (last burn)' column found in panel_work_ready.")
+message("Using days-since column: ", days_col)
+
+# 1) Cell-level dataset (use means per cell)
+df_cells <- panel_work_ready %>%
+  group_by(cell_id) %>%
+  summarise(
+    fire_count      = sum(y == 1, na.rm = TRUE),
+    exposure        = n(),                              # or n_distinct(date)
+    cell_vpd_mean   = mean(cell_vpd_mean,  na.rm = TRUE),
+    cell_pr_mean    = mean(cell_pr_mean,   na.rm = TRUE),
+    cell_wind_mean  = mean(cell_wind_mean, na.rm = TRUE),
+    cell_days_since_mean = mean(.data[[days_col]], na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::drop_na(fire_count, exposure, cell_vpd_mean, cell_pr_mean, cell_wind_mean, cell_days_since_mean) %>%
+  filter(exposure > 0)
+
+# Standardize
+scale_safe <- function(x){ s <- sd(x, na.rm=TRUE); if (!is.finite(s) || s==0) return(rep(0,length(x))); (x-mean(x,na.rm=TRUE))/s }
+df_cells <- df_cells %>%
+  mutate(
+    z_vpd        = scale_safe(cell_vpd_mean),
+    z_pr         = scale_safe(cell_pr_mean),
+    z_wind       = scale_safe(cell_wind_mean),
+    z_days_since = scale_safe(cell_days_since_mean)
+  )
+
+# 2) Poisson GLM
+m1 <- glm(
+  fire_count ~ z_vpd + z_pr + z_wind + z_days_since + offset(log(exposure)),
+  data = df_cells, family = poisson(link = "log")
+)
+
+cat("=== Climate-only + Days-Since (cell-level) Poisson GLM ===\n")
+print(summary(m1))
+
+# 3) Fit stats
+pseudo_r2 <- 1 - (m1$deviance / m1$null.deviance)
+phi <- m1$deviance / m1$df.residual
+cat(sprintf("\nPseudo-R^2: %.3f | Overdispersion φ: %.2f\n", pseudo_r2, phi))
+
+# 4) IRR with Wald 95% CIs
+b  <- coef(m1); se <- sqrt(diag(vcov(m1)))
+IRR_tbl <- data.frame(
+  term = names(b),
+  IRR = exp(b),
+  IRR_lo = exp(b - 1.96*se),
+  IRR_hi = exp(b + 1.96*se),
+  row.names = NULL
+)
+print(IRR_tbl)
+
+# 5) Residual diagnostics (deviance + Pearson + QQ)
+par(mfrow=c(1,2))
+plot(fitted(m1), residuals(m1, type="deviance"),
+     pch=20, col="steelblue",
+     xlab=expression("Fitted counts ("*hat(lambda)*" per cell)"),
+     ylab="Deviance residuals",
+     main="Residuals vs Fitted — Poisson")
+abline(h=0, col="red", lwd=2)
+qqnorm(residuals(m1, type="deviance"), main="QQ — Deviance residuals"); qqline(residuals(m1, type="deviance"), col="red", lwd=2)
+
+# Pearson residual check & influential cells
+pearson_resid <- residuals(m1, type="pearson")
+cook <- cooks.distance(m1)
+
+# 6) Observed vs Predicted (cell totals)
+df_cells$predicted <- fitted(m1)
+ggplot(df_cells, aes(x = predicted, y = fire_count)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope=1, intercept=0, linetype=2) +
+  coord_equal() +
+  scale_x_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  scale_y_continuous(labels = label_number(scale_cut = cut_short_scale())) +
+  labs(title="Observed vs Predicted Fires per Cell",
+       x = expression(hat(lambda)~"(predicted)"), y = "Observed fires")
+
+```
+
+
+```{r}
+library(dplyr)
+
+df_cells <- panel_work_ready %>%
+  group_by(cell_id) %>%
+  summarise(
+    fire_count = sum(y == 1, na.rm = TRUE),
+    exposure   = if ("date" %in% names(cur_data_all())) n_distinct(date) else n(),
+    z_vpd      = mean(z_vpd,  na.rm = TRUE),
+    z_pr       = mean(z_pr,   na.rm = TRUE),
+    z_wind     = mean(z_wind, na.rm = TRUE),
+    z_ds       = mean(z_ds,   na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::drop_na(fire_count, exposure, z_vpd, z_pr, z_wind, z_ds) %>%
+  mutate(log_exp = log(pmax(exposure, 1)))
+
+
+library(MASS)
+
+# 1) Poisson — climate only
+m1 <- glm(fire_count ~ z_vpd + z_pr + z_wind + offset(log_exp),
+          data = df_cells, family = poisson())
+summary(m1); AIC(m1)
+
+# 2) Poisson — climate + days-since
+m2 <- glm(fire_count ~ z_vpd + z_pr + z_wind + z_ds + offset(log_exp),
+          data = df_cells, family = poisson())
+summary(m2); AIC(m2)
+
+
+```
+
+```{r}
+library(ggplot2)
+
+# --- choose the model you want to visualize ---
+use_mod <- m2            # or m2_qp / m3 if you prefer
+
+# --- gather fitted values & residuals ---
+df_cells$fit   <- fitted(use_mod)
+df_cells$r_dev <- residuals(use_mod, type = "deviance")
+df_cells$r_pea <- residuals(use_mod, type = "pearson")
+
+# Keep finite rows only (defensive)
+plot_df <- subset(df_cells, is.finite(fit) & is.finite(r_dev) & is.finite(r_pea))
+
+# ============== 1) Residuals vs Fitted (Deviance residuals) ==============
+p_resfit <- ggplot(plot_df, aes(x = fit, y = r_dev)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(
+    title = "Residuals vs Fitted — Poisson (climate + days-since)",
+    x = expression("Fitted counts ("*hat(lambda)*" per cell)"),
+    y = "Deviance residuals"
+  ) +
+  theme_minimal()
+
+p_resfit
+
+# ============== 2) QQ-plot of Deviance residuals ==========================
+# ggplot's stat_qq works on a column called 'sample'
+qq_df <- data.frame(sample = plot_df$r_dev)
+
+p_qq <- ggplot(qq_df, aes(sample = sample)) +
+  stat_qq(alpha = 0.7) +
+  stat_qq_line(color = "red") +
+  labs(
+    title = "QQ-plot — Deviance residuals (Poisson)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  theme_minimal()
+
+p_qq
+
+
+
+```
+
+`
+
+```{r}
+library(dplyr); library(MASS)
+
+vars <- c("fire_count","log_exp","z_vpd","z_pr","z_wind","z_ds")
+sapply(df_cells[vars], function(x) sum(!is.finite(x)))   # counts of NA/NaN/Inf
+sapply(df_cells[vars], function(x) sd(x, na.rm = TRUE))  # look for zeros
+
+X <- c("z_vpd","z_pr","z_wind","z_ds")
+nzv <- sapply(df_cells[X], function(x) isTRUE(sd(x, na.rm=TRUE) == 0))
+X_keep <- X[!nzv]  
+
+df_nb <- df_cells %>%
+  mutate(
+    fire_count = as.integer(fire_count),
+    log_exp    = log(pmax(exposure, 1))                 # guard offset
+  ) %>%
+  filter(exposure > 0, fire_count >= 0) %>%
+  filter(if_all(all_of(c("log_exp", X_keep)), ~ is.finite(.)))
+winsor <- function(x, p=0.005){qs <- quantile(x, c(p,1-p), na.rm=TRUE); pmin(pmax(x,qs[1]), qs[2])}
+df_nb[X_keep] <- lapply(df_nb[X_keep], winsor)
+
+form_nb <- as.formula(
+  paste("fire_count ~", paste(X_keep, collapse=" + "), "+ offset(log_exp)")
+)
+
+m_pois <- glm(form_nb, data=df_nb, family=poisson(), control=glm.control(maxit=100))
+m_nb   <- glm.nb(form_nb, data=df_nb,
+                 start = coef(m_pois), init.theta = 1,
+                 control = glm.control(maxit = 200, epsilon = 1e-8))
+
+summary(m_nb); AIC(m_nb)
+
+```
+```{r}
+library(car)
+
+mm_lin <- lm(fire_count ~ z_vpd + z_pr + z_wind + z_ds, data = df_cells)
+vif_vals <- car::vif(mm_lin)
+vif_vals
+sqrt(vif_vals) 
+
+```
+
+
+```{r}
+
+df_nb$fit_nb  <- fitted(m_nb)
+df_nb$rdev_nb <- residuals(m_nb, type = "deviance")
+
+plot_df <- subset(df_nb, is.finite(fit_nb) & is.finite(rdev_nb))
+
+ggplot(plot_df, aes(x = fit_nb, y = rdev_nb)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(
+    title = "Residuals vs Fitted — Negative Binomial",
+    x = expression("Fitted counts ("*hat(lambda)*" per cell)"),
+    y = " Residuals"
+  ) +
+  theme_minimal()
+
+ggplot(plot_df, aes(sample = rdev_nb)) +
+  stat_qq(alpha = 0.7) +
+  stat_qq_line(color = "red") +
+  labs(
+    title = "QQ-plot — Deviance residuals (NB)",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  theme_minimal()
+
+
+
+
+```
+```{r}
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(sf)
+  library(ggplot2)
+  library(tidyr)
+})
+
+# 1) Observed & predicted counts + residuals
+df_pred <- df_cells %>%
+  transmute(
+    cell_id,
+    obs  = as.integer(fire_count),
+    pred = as.numeric(fitted(m_nb))   # predicted *counts* per cell
+  ) %>%
+  mutate(resid = obs - pred)
+
+# 2) Join to grid for geometry
+grid_pred <- grid %>%
+  left_join(df_pred, by = "cell_id")
+
+# 3) Bins & grayscale palette
+breaks_ct <- c(-Inf, 0, 1, 9, 49, 99, 500, Inf)
+labels_ct <- c("0", "1", "2–9", "10–49", "50–99", "100–500", "501+")
+
+pal_bins <- c(
+  "0"        = "#FFFFFF",
+  "1"        = "#E6E6E6",
+  "2–9"      = "#CCCCCC",
+  "10–49"    = "#B3B3B3",
+  "50–99"    = "#999999",
+  "100–500"  = "#666666",
+  "501+"     = "#262626"
+)
+
+# 4) Long format for side-by-side maps (Observed vs Predicted)
+plot_long <- grid_pred %>%
+  st_drop_geometry() %>%
+  mutate(
+    obs_bin  = cut(obs,  breaks = breaks_ct, labels = labels_ct,
+                   right = TRUE, include.lowest = TRUE),
+    pred_bin = cut(pred, breaks = breaks_ct, labels = labels_ct,
+                   right = TRUE, include.lowest = TRUE)
+  ) %>%
+  dplyr::select(cell_id, obs_bin, pred_bin) %>%   # <-- explicit dplyr::select
+  pivot_longer(c(obs_bin, pred_bin),
+               names_to = "which", values_to = "bin") %>%
+  mutate(which = dplyr::recode(
+    which,
+    obs_bin  = "Observed counts",
+    pred_bin = "Predicted counts (NB)"
+  ))
+
+plot_ab <- grid %>%
+  left_join(plot_long, by = "cell_id")
+
+# 5) Observed vs predicted map
+p_maps <- ggplot(plot_ab) +
+  geom_sf(aes(fill = bin), color = "grey40", linewidth = 0.1) +
+  scale_fill_manual(values = pal_bins, name = "Fire count", drop = FALSE) +
+  facet_wrap(~ which, ncol = 2) +
+  labs(title = "Observed vs Predicted Fires per Grid Cell — Negative Binomial") +
+  theme_minimal()
+
+p_maps
+
+# 6) Residual map (Observed - Predicted)
+p_resid <- ggplot(grid_pred) +
+  geom_sf(aes(fill = resid), color = "grey40", linewidth = 0.1) +
+  scale_fill_gradient2(
+    low  = "#2166AC",
+    mid  = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "Residual (obs − pred)"
+  ) +
+  labs(title = "Residuals per Cell (NB model)") +
+  theme_minimal()
+
+p_resid
+
+
+
+
+
+
+```
+`
+```{r}
+library(dplyr)
+library(MASS)   # for glm.nb
+
+# --- per-cell baseline using z_pr ---
+df_base_pr <- panel_work_ready %>%
+  group_by(cell_id) %>%
+  summarise(
+    fire_count = sum(y == 1, na.rm = TRUE),
+    z_pr       = mean(z_pr, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    fire_count = as.integer(coalesce(fire_count, 0L)),
+    z_pr       = as.numeric(z_pr)
+  ) %>%
+  # drop any non-finite rows
+  filter(if_all(c(fire_count, z_pr), ~ is.finite(.))) %>%
+  # optional: gentle winsor to avoid leverage explosions
+  mutate(z_pr = {
+    qs <- quantile(z_pr, c(0.005, 0.995), na.rm = TRUE)
+    pmin(pmax(z_pr, qs[1]), qs[2])
+  })
+
+# sanity: should both be 0
+sapply(df_base_pr[,c("fire_count","z_pr")], function(x) sum(!is.finite(x)))
+
+# --- Baseline Poisson (no offset, 1 predictor) ---
+m_base_pr <- glm(fire_count ~ z_pr, family = poisson(), data = df_base_pr)
+summary(m_base_pr); AIC(m_base_pr)
+
+# --- Baseline Negative Binomial (no offset, 1 predictor) ---
+m_pois_start <- glm(fire_count ~ z_pr, family = poisson(), data = df_base_pr)
+m_base_nb_pr <- glm.nb(
+  fire_count ~ z_pr,
+  data = df_base_pr,
+  start = coef(m_pois_start), init.theta = 1,
+  control = glm.control(maxit = 200, epsilon = 1e-8)
+)
+summary(m_base_nb_pr); AIC(m_base_nb_pr)
+
+# --- quick metrics (counts) ---
+rmse <- function(a,b) sqrt(mean((a-b)^2))
+mae  <- function(a,b) mean(abs(a-b))
+
+pred_pois <- fitted(m_base_pr)
+pred_nb   <- fitted(m_base_nb_pr)
+
+c(
+  AIC_pois = AIC(m_base_pr),
+  AIC_nb   = AIC(m_base_nb_pr),
+  RMSE_pois = rmse(df_base_pr$fire_count, pred_pois),
+  RMSE_nb   = rmse(df_base_pr$fire_count, pred_nb),
+  COR_pois  = cor(df_base_pr$fire_count, pred_pois),
+  COR_nb    = cor(df_base_pr$fire_count, pred_nb)
+)
+
+
+
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(sf)
+})
+
+## ---- 1. Compute residuals & fitted values for the baseline NB model ----
+diag_base <- df_base_pr %>%
+  mutate(
+    fitted_nb  = as.numeric(fitted(m_base_nb_pr)),
+    res_dev_nb = as.numeric(residuals(m_base_nb_pr, type = "deviance")),
+    res_pear_nb = as.numeric(residuals(m_base_nb_pr, type = "pearson"))
+  )
+
+## ---- 2. Residual vs fitted plot (deviance residuals) ----
+p_res_fit <- ggplot(diag_base, aes(x = fitted_nb, y = res_dev_nb)) +
+  geom_point(alpha = 0.4) +
+  geom_hline(yintercept = 0, colour = "red", linetype = "dashed") +
+  geom_smooth(se = FALSE, colour = "blue", linewidth = 0.7) +
+  labs(
+    x = "Fitted fire counts (baseline NB, z_pr)",
+    y = "Deviance residuals",
+    title = "Residuals vs Fitted – Baseline NB Model"
+  ) +
+  theme_minimal()
+
+p_res_fit
+
+## ---- 3. QQ plot of standardized deviance residuals ----
+diag_base <- diag_base %>%
+  mutate(std_res_nb = as.numeric(scale(res_dev_nb)))   # z-score residuals
+
+p_qq <- ggplot(diag_base, aes(sample = std_res_nb)) +
+  stat_qq(alpha = 0.5) +
+  stat_qq_line(colour = "red") +
+  labs(
+    x = "Theoretical quantiles",
+    y = "Standardized deviance residuals",
+    title = "Normal Q–Q Plot – Baseline NB Residuals"
+  ) +
+  theme_minimal()
+
+p_qq
+
+## ---- 4. Spatial residual map (deviance residuals per cell) ----
+# join residuals to your grid (assumes `grid` has cell_id + geometry)
+grid_base_res <- grid %>%
+  left_join(diag_base %>% dplyr::select(cell_id, res_dev_nb), by = "cell_id")
+
+p_res_map <- ggplot(grid_base_res) +
+  geom_sf(aes(fill = res_dev_nb), colour = "grey70", linewidth = 0.1) +
+  scale_fill_gradient2(
+    low  = "#2166AC",
+    mid  = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "Deviance residual"
+  ) +
+  labs(
+    title = "Residuals per Cell – Baseline NB Model (z_pr only)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal()
+
+p_res_map
+
+
+
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(sf)
+  library(ggplot2)
+  library(tidyr)
+})
+
+# 1) Observed & predicted counts per cell for the BASELINE NB model
+df_pred_base <- df_base_pr %>%
+  transmute(
+    cell_id,
+    obs  = as.integer(fire_count),
+    pred = as.numeric(fitted(m_base_nb_pr))   # baseline NB predicted counts
+  )
+
+grid_pred_base <- grid %>%
+  left_join(df_pred_base, by = "cell_id")
+
+# 2) Bins & greyscale palette
+breaks_ct <- c(-Inf, 0, 1, 9, 49, 99, 500, Inf)
+labels_ct <- c("0", "1", "2–9", "10–49", "50–99", "100–500", "501+")
+
+pal_bins <- c(
+  "0"        = "#FFFFFF",
+  "1"        = "#E6E6E6",
+  "2–9"      = "#CCCCCC",
+  "10–49"    = "#B3B3B3",
+  "50–99"    = "#999999",
+  "100–500"  = "#666666",
+  "501+"     = "#000000"
+)
+
+# 3) Long format: Observed vs Predicted
+plot_long_base <- grid_pred_base %>%
+  st_drop_geometry() %>%
+  mutate(
+    obs_bin  = cut(obs,  breaks = breaks_ct, labels = labels_ct,
+                   right = TRUE, include.lowest = TRUE),
+    pred_bin = cut(pred, breaks = breaks_ct, labels = labels_ct,
+                   right = TRUE, include.lowest = TRUE)
+  ) %>%
+  dplyr::select(cell_id, obs_bin, pred_bin) %>%
+  pivot_longer(c(obs_bin, pred_bin), names_to = "which", values_to = "bin") %>%
+  mutate(which = dplyr::recode(
+    which,
+    obs_bin  = "Observed counts",
+    pred_bin = "Predicted counts (NB, baseline z_pr)"
+  ))
+
+plot_ab_base <- grid %>%
+  left_join(plot_long_base, by = "cell_id")
+
+# 4) Plot: Observed vs Predicted (greyscale)
+p_maps_base <- ggplot(plot_ab_base) +
+  geom_sf(aes(fill = bin), color = "grey60", linewidth = 0.1) +
+  scale_fill_manual(values = pal_bins, name = "Fire count", drop = FALSE) +
+  facet_wrap(~ which, ncol = 2) +
+  labs(
+    title = "Observed vs Predicted Fires per Grid Cell — Baseline NB (z_pr only)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal()
+
+p_maps_base
+
+
+```
+
+```{r}
+library(sf)
+
+objs <- Filter(\(x) inherits(get(x), "sf"), ls())
+data.frame(
+  object = objs,
+  geom   = sapply(objs, \(x) as.character(st_geometry_type(get(x), by_geometry = FALSE)))
+)
+
+```
+
+
+
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(sf)
+  library(tidyr)
+  library(MASS)
+})
+
+# ---- 1. Residuals / influence for your NB model ----
+res_dev   <- residuals(m_nb, type = "deviance")
+res_pear  <- residuals(m_nb, type = "pearson")
+fitted_nb <- fitted(m_nb)
+hat       <- hatvalues(m_nb)          # leverage
+cook      <- cooks.distance(m_nb)     # influence (glm.nb supports this)
+
+diag_tbl <- df_nb %>%
+  mutate(
+    cell_id  = df_nb$cell_id,
+    res_dev  = as.numeric(res_dev),
+    res_pear = as.numeric(res_pear),
+    fitted   = as.numeric(fitted_nb),
+    hat      = as.numeric(hat),
+    cooks_d  = as.numeric(cook)
+  ) %>%
+  # common “outlier-ish” rules of thumb
+  mutate(
+    flag_big_res   = abs(res_dev) > 2,
+    flag_high_hat  = hat > (2 * mean(hat, na.rm = TRUE)),
+    flag_high_cook = cooks_d > (4 / dplyr::n())
+  )
+
+# Top residuals / influence (optional inspection)
+top_resid <- diag_tbl %>% arrange(desc(abs(res_dev))) %>% slice_head(n = 15)
+top_infl  <- diag_tbl %>% arrange(desc(cooks_d))      %>% slice_head(n = 15)
+
+# ---- 2. Spatial residual map ----
+out_sf <- grid %>%
+  left_join(diag_tbl, by = "cell_id")
+
+ggplot(out_sf) +
+  geom_sf(aes(fill = res_dev), color = "grey70", linewidth = 0.1) +
+  scale_fill_gradient2(
+    low       = "#2166AC",
+    mid       = "white",
+    high      = "#B2182B",
+    midpoint  = 0,
+    name      = "Residual"
+  ) +
+  labs(title = "Where the model misses (residuals)") +
+  theme_minimal()
+
+# ---- 3. Mean predictor values: outliers vs ok ----
+diag_tbl %>%
+  mutate(outlier = abs(res_dev) > 2) %>%
+  dplyr::select(outlier, z_vpd, z_pr, z_wind, z_ds, fitted) %>%  # <-- explicit dplyr::select
+  summarise(
+    across(
+      .cols = -outlier,
+      .fns  = list(
+        mean_out = ~ mean(.x[outlier],  na.rm = TRUE),
+        mean_ok  = ~ mean(.x[!outlier], na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+# ---- 4. Boxplots: predictors for outliers vs ok ----
+diag_tbl %>%
+  mutate(outlier = ifelse(abs(res_dev) > 2, "outlier", "ok")) %>%
+  pivot_longer(c(z_vpd, z_pr, z_wind, z_ds)) %>%
+  ggplot(aes(outlier, value, fill = outlier)) +
+  geom_boxplot(outlier.alpha = 0.2) +
+  facet_wrap(~ name, scales = "free_y") +
+  guides(fill = "none") +
+  theme_minimal()
+
+# ---- 5. Sensitivity fit: drop highly influential cells ----
+bad_cells <- diag_tbl %>%
+  filter(cooks_d > (4 / dplyr::n())) %>%
+  pull(cell_id)
+
+m_nb_sens <- MASS::glm.nb(
+  update(formula(m_nb), . ~ .),
+  data    = df_nb %>% filter(!cell_id %in% bad_cells),
+  control = glm.control(maxit = 200)
+)
+
+c(
+  AIC_full = AIC(m_nb),
+  AIC_trim = AIC(m_nb_sens)
+)
+
+```
+
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(sf)
+  library(ggplot2)
+  library(scales)
+  library(tigris)   # make sure tigris is installed already
+})
+
+# ---------------------------
+# 1) Get/prepare LA County polygon (creates `county` if missing)
+# ---------------------------
+if (!exists("county")) {
+  options(tigris_use_cache = TRUE)
+
+  county <- counties(state = "CA", year = 2022, cb = TRUE) |>
+    st_as_sf() |>
+    filter(NAME == "Los Angeles") |>
+    st_make_valid() |>
+    st_transform(crs = st_crs(grid))  # match your grid CRS
+}
+
+# Ensure all geometries are valid and in the same CRS
+grid   <- st_make_valid(grid)   |> st_transform(st_crs(county))
+county <- st_make_valid(county)
+
+# ---------------------------
+# 2) Keep only grid cells with land overlap (clip out ocean cells)
+# ---------------------------
+intersects_land <- st_intersects(grid, county, sparse = FALSE)[, 1]
+grid_land <- grid[intersects_land, ]
+
+# ---------------------------
+# 3) Predicted totals and annualized rates (use constant study length)
+# ---------------------------
+years <- if (exists("panel_work_ready") && "date" %in% names(panel_work_ready)) {
+  as.numeric((max(panel_work_ready$date, na.rm = TRUE) -
+              min(panel_work_ready$date, na.rm = TRUE) + 1) / 365)
+} else {
+  10  # fallback if dates not available
+}
+
+df_risk <- df_cells |>
+  mutate(
+    pred_total = as.numeric(predict(m_nb, type = "response")),  # expected total over study window
+    pred_per_yr = pred_total / years                            # constant denominator avoids rate inflation
+  ) |>
+  dplyr::select(cell_id, pred_total, pred_per_yr)   # <-- key fix
+
+# ---------------------------
+# 4) Join predictions to LAND grid only
+# ---------------------------
+grid_risk <- grid_land |>
+  left_join(df_risk, by = "cell_id")
+
+# Guard against missing/invalid
+grid_risk <- grid_risk |>
+  mutate(pred_per_yr = ifelse(is.na(pred_per_yr) | pred_per_yr < 0, NA_real_, pred_per_yr))
+
+# ---------------------------
+# 5) Define risk tiers (top 10% = High, 70–90% = Elevated)
+# ---------------------------
+qs <- quantile(grid_risk$pred_per_yr, probs = c(0.70, 0.90), na.rm = TRUE)
+
+grid_risk <- grid_risk |>
+  mutate(risk_tier = case_when(
+    is.na(pred_per_yr)        ~ "No data",
+    pred_per_yr >= qs[2]      ~ "High (Top 10%)",
+    pred_per_yr >= qs[1]      ~ "Elevated (70–90%)",
+    TRUE                      ~ "Baseline (<70%)"
+  )) |>
+  mutate(risk_tier = factor(
+    risk_tier,
+    levels = c("Baseline (<70%)", "Elevated (70–90%)", "High (Top 10%)", "No data")
+  ))
+
+# ---------------------------
+# 6) Plot: Most Dangerous Locations (tiered) — ocean cells removed
+# ---------------------------
+p_tiers <- ggplot(grid_risk) +
+  geom_sf(aes(fill = risk_tier), color = "grey75", linewidth = 0.1) +
+  scale_fill_manual(
+    name = "Risk tier (model-based)",
+    values = c(
+      "Baseline (<70%)"   = "#E6E6E6",
+      "Elevated (70–90%)" = "#B3B3B3",
+      "High (Top 10%)"    = "#B30000",
+      "No data"           = "#FFFFFF"
+    ),
+    drop = FALSE
+  ) +
+  labs(title = "Most Dangerous Locations (by Model-Predicted Fire Count)") +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+
+print(p_tiers)
+
+
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr); library(sf); library(ggplot2); library(scales)
+})
+
+# 1) Predicted totals and annualized rate from your NB model
+df_risk <- df_cells %>%
+  mutate(
+    pred_total = as.numeric(predict(m_nb, type = "response")),   # expected total detections (10y)
+    pred_per_yr = pred_total / (exposure / 365)                  # expected detections per year
+  ) %>%
+  dplyr::select(cell_id, pred_total, pred_per_yr)   # <-- use dplyr::select
+
+# 2) Join to grid
+grid_risk <- grid %>% left_join(df_risk, by = "cell_id")
+
+# 3) Define risk tiers from the model (by predicted annual rate)
+qs <- quantile(grid_risk$pred_per_yr, probs = c(.70, .90), na.rm = TRUE)  # 70th & 90th pct
+grid_risk <- grid_risk %>%
+  mutate(risk_tier = case_when(
+    pred_per_yr >= qs[2] ~ "High (Top 10%)",
+    pred_per_yr >= qs[1] ~ "Elevated (70–90%)",
+    TRUE                 ~ "Baseline (<70%)"
+  )) %>%
+  mutate(risk_tier = factor(
+    risk_tier,
+    levels = c("Baseline (<70%)", "Elevated (70–90%)", "High (Top 10%)")
+  ))
+
+# 4A) Continuous risk surface (predicted annual detections)
+p_continuous <- ggplot(grid_risk) +
+  geom_sf(aes(fill = pred_per_yr), color = "grey75", linewidth = 0.1) +
+  scale_fill_gradient(
+    name = "Predicted fires / year",
+    low  = "#F2F2F2",
+    high = "#B30000",
+    labels = number_format(accuracy = 0.1)
+  ) +
+  labs(title = "Model-Predicted Wildfire Activity (Annualized)") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+# 4B) Tiered hotspot map (most “dangerous” cells)
+p_tiers <- ggplot(grid_risk) +
+  geom_sf(aes(fill = risk_tier), color = "grey75", linewidth = 0.1) +
+  scale_fill_manual(
+    name = "Risk tier (model-based)",
+    values = c(
+      "Baseline (<70%)"    = "#E6E6E6",
+      "Elevated (70–90%)"  = "#B3B3B3",
+      "High (Top 10%)"     = "#B30000"
+    )
+  ) +
+  labs(title = "Most Dangerous Locations (by Model-Predicted Fire Count)") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+p_continuous
+p_tiers
+
+
+```
+```{r}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(sf)
+})
+
+## ---- 1. Cell-level intensity λ̂ and 1/λ̂ from NB model ----
+# df_nb has: cell_id, fire_count, exposure, z_vpd, z_pr, z_wind, z_ds
+# m_nb is the glm.nb fitted on df_nb with offset(log_exp)
+
+diag_lambda <- df_nb %>%
+  mutate(
+    mu_hat      = as.numeric(fitted(m_nb)),        # expected fires over study window
+    lambda_hat  = mu_hat / exposure,              # expected fires per exposure unit
+    inv_lambda  = 1 / pmax(lambda_hat, 1e-8)      # 1/λ̂, guard against zero
+  )
+
+## ---- 2. Histogram of 1/λ̂ (SG-style residual proxy) ----
+p_hist_invlam <- ggplot(diag_lambda, aes(x = inv_lambda)) +
+  geom_histogram(bins = 30, fill = "grey80", colour = "grey40") +
+  labs(
+    x = expression("Inverse intensity " ~ 1 / hat(lambda)[cell]),
+    y = "Number of cells",
+    title = "Distribution of Inverse Intensity 1 / λ̂ (NB Count Model)"
+  ) +
+  theme_minimal()
+
+p_hist_invlam
+
+## ---- 3. QQ plot of 1/λ̂ vs Exponential (rough SG check) ----
+n_cells <- nrow(diag_lambda)
+rate_theoretical <- 1 / mean(diag_lambda$inv_lambda, na.rm = TRUE)  # match mean
+
+theoretical_q <- qexp(ppoints(n_cells), rate = rate_theoretical)
+empirical_q   <- sort(diag_lambda$inv_lambda)
+
+df_qq <- data.frame(
+  theo = theoretical_q,
+  emp  = empirical_q
+)
+
+p_qq_invlam <- ggplot(df_qq, aes(x = theo, y = emp)) +
+  geom_point(alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, colour = "red") +
+  labs(
+    x = "Theoretical quantiles (Exp)",
+    y = expression("Empirical quantiles of " ~ 1 / hat(lambda)[cell]),
+    title = "QQ Plot of Inverse Intensity 1 / λ̂ (NB Model)"
+  ) +
+  theme_minimal()
+
+p_qq_invlam
+
+## ---- 4. Map of λ̂ and 1/λ̂ on your 10×10 km grid ----
+grid_lambda <- grid %>%
+  left_join(diag_lambda %>% dplyr::select(cell_id, lambda_hat, inv_lambda),
+            by = "cell_id")
+
+# (a) Intensity map λ̂
+p_map_lambda <- ggplot(grid_lambda) +
+  geom_sf(aes(fill = lambda_hat), colour = "grey70", linewidth = 0.1) +
+  scale_fill_gradient(
+    low  = "#F2F2F2",
+    high = "#B2182B",
+    name = expression(hat(lambda)[cell])
+  ) +
+  labs(
+    title = "NB Model: Estimated Fire Intensity λ̂ per Cell",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal()
+
+p_map_lambda
+
+p_map_invlam <- ggplot(grid_lambda) +
+  geom_sf(aes(fill = inv_lambda), colour = "grey70", linewidth = 0.1) +
+  scale_fill_gradient(
+    low  = "#FFFFFF",  # white
+    high = "#262626",  # dark grey
+    name = expression(1 / hat(lambda)[cell])
+  ) +
+  labs(
+    title = "NB Model: Inverse Intensity 1 / λ̂ per Cell (Greyscale)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+
+p_map_invlam
+
+
+
+```
+
